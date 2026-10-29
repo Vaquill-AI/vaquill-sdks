@@ -1,5 +1,7 @@
 # vaquill
 
+[![PyPI](https://img.shields.io/pypi/v/vaquill)](https://pypi.org/project/vaquill/) [![Python](https://img.shields.io/pypi/pyversions/vaquill)](https://pypi.org/project/vaquill/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Vaquill-AI/vaquill-sdks/blob/main/LICENSE)
+
 Python SDK for the Vaquill US primary law Data API: statutes, regulations, court rules, constitutions, session laws and law-change alerts.
 
 Server-side use only: an API key (`vq_key_...`) must never ship to a browser.
@@ -39,6 +41,14 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+## Documentation
+
+- [Python guide](https://www.vaquill.ai/docs/api-guide/sdks/python) and the [SDK overview](https://www.vaquill.ai/docs/api-guide/sdks/overview)
+- [Data API guide](https://www.vaquill.ai/docs/api-guide/overview): authentication, pagination, errors, alerts
+- [API reference](https://www.vaquill.ai/docs/api-reference/): every endpoint and field
+- Get an API key at [app.vaquill.ai/settings](https://app.vaquill.ai/settings)
+- Source, issues and releases: [Vaquill-AI/vaquill-sdks](https://github.com/Vaquill-AI/vaquill-sdks)
 
 ## Namespaces
 

@@ -1,5 +1,7 @@
 # @vaquill-ai/sdk
 
+[![npm](https://img.shields.io/npm/v/@vaquill-ai/sdk)](https://www.npmjs.com/package/@vaquill-ai/sdk) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Vaquill-AI/vaquill-sdks/blob/main/LICENSE)
+
 TypeScript client for the Vaquill US primary law Data API.
 It is a small handwritten layer over native `fetch` with zero runtime dependencies.
 Request and response types are generated from the OpenAPI document by `openapi-typescript` (a dev dependency only).
@@ -19,6 +21,14 @@ console.log(res.results?.length, res.creditsConsumed);
 const { data, meta } = await client.statutes.getSection("TX_PE_22.01").withResponse();
 console.log(meta.requestId, meta.creditsConsumed, meta.rateLimit.remainingDay);
 ```
+
+## Documentation
+
+- [TypeScript guide](https://www.vaquill.ai/docs/api-guide/sdks/typescript) and the [SDK overview](https://www.vaquill.ai/docs/api-guide/sdks/overview)
+- [Data API guide](https://www.vaquill.ai/docs/api-guide/overview): authentication, pagination, errors, alerts
+- [API reference](https://www.vaquill.ai/docs/api-reference/): every endpoint and field
+- Get an API key at [app.vaquill.ai/settings](https://app.vaquill.ai/settings)
+- Source, issues and releases: [Vaquill-AI/vaquill-sdks](https://github.com/Vaquill-AI/vaquill-sdks)
 
 ## Client options
 
