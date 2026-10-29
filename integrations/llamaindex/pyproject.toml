@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llama-index-tools-vaquill"
+dynamic = ["version"]
+description = "LlamaIndex tools and retriever for the Vaquill US primary law Data API (statutes, regulations, court rules, constitutions, session laws)."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<4.0"
+authors = [{ name = "Vaquill", email = "support@vaquill.ai" }]
+maintainers = [{ name = "Vaquill" }]
+keywords = ["llama-index", "llamaindex", "vaquill", "legal", "law", "statutes", "regulations", "agent", "retriever", "rag"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+dependencies = [
+  "llama-index-core>=0.12.38,<0.15",
+  "vaquill>=0.2.0,<0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "pyright>=1.1.380",
+]
+
+[project.urls]
+Homepage = "https://www.vaquill.ai"
+Documentation = "https://www.vaquill.ai/docs/api-guide/sdks/overview"
+Source = "https://github.com/Vaquill-AI/vaquill-sdks/tree/main/integrations/llamaindex"
+Issues = "https://github.com/Vaquill-AI/vaquill-sdks/issues"
+
+[tool.hatch.version]
+path = "llama_index/tools/vaquill/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["llama_index/", "tests/", "README.md", "LICENSE", "Makefile"]
+
+[tool.hatch.build.targets.wheel]
+include = ["llama_index/"]
+
+# Metadata block read by LlamaHub and the llama_index monorepo tooling.
+[tool.llamahub]
+contains_example = false
+import_path = "llama_index.tools.vaquill"
+
+[tool.llamahub.class_authors]
+VaquillToolSpec = "vaquill"
+VaquillRetriever = "vaquill"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra -m 'not live'"
+markers = ["live: calls the real Vaquill API and spends credits; opt in with -m live"]
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+[tool.coverage.run]
+source = ["llama_index"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["UP006", "UP007", "UP035", "UP045", "UP037", "RUF012"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["llama_index"]
+
+[tool.pyright]
+include = ["llama_index", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"

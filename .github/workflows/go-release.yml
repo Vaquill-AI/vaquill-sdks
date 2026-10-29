@@ -1,0 +1,154 @@
+name: Go release
+
+# Push a tag to release. A Go module is published by its git tag alone: there is no
+# registry upload. Because the module lives in the subdirectory go/, the tag MUST be
+# prefixed with that directory:
+#
+#   go/v0.1.0        ->  module version v0.1.0 (stable)
+#   go/v0.2.0-rc.1   ->  module version v0.2.0-rc.1 (GitHub pre-release)
+#
+# This workflow runs the Go CI on the tag, checks the tag against Version in
+# go/config.go, creates the GitHub Release, then asks proxy.golang.org and
+# pkg.go.dev to fetch the new version so `go get` and the docs work at once.
+#
+# Nothing here holds a secret. The proxy and pkg.go.dev are public endpoints.
+# The Python and JavaScript packages have their own workflows and tags
+# (python-v*, js-v*): one repository, independent releases.
+on:
+  push:
+    tags: ["go/v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Go CI on the tagged commit
+    uses: ./.github/workflows/go-ci.yml
+    permissions:
+      contents: read
+
+  verify:
+    name: Verify the tag
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      version: ${{ steps.classify.outputs.version }}
+      contract: ${{ steps.classify.outputs.contract }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the tag and verify it
+        id: classify
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^go/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=false
+          elif [[ "$TAG" =~ ^go/v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+            prerelease=true
+          else
+            echo "::error::Tag '$TAG' is not go/vX.Y.Z or a semver pre-release (go/vX.Y.Z-rc.1)"
+            exit 1
+          fi
+          version="${TAG#go/v}"
+          file_version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' go/config.go)"
+          if [ "$file_version" != "$version" ]; then
+            echo "::error::Tag is $version but Version in go/config.go is '$file_version'"
+            exit 1
+          fi
+          module="$(sed -n 's/^module //p' go/go.mod)"
+          if [ "$module" != "github.com/Vaquill-AI/vaquill-sdks/go" ]; then
+            echo "::error::go/go.mod declares module '$module'; the tag prefix go/ only works for github.com/Vaquill-AI/vaquill-sdks/go"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Tagged commit is not on $DEFAULT_BRANCH"
+            exit 1
+          fi
+          contract="$(grep -v '^[[:space:]]*#' CONTRACT_VERSION | head -n 1 | tr -d '[:space:]')"
+          {
+            echo "prerelease=$prerelease"
+            echo "version=$version"
+            echo "contract=$contract"
+          } >> "$GITHUB_OUTPUT"
+
+  github-release:
+    name: GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create the release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          CONTRACT: ${{ needs.verify.outputs.contract }}
+        run: |
+          set -euo pipefail
+          args=(--verify-tag --title "$TAG" --generate-notes --notes "API contract version: ${CONTRACT}")
+          if [ "$PRERELEASE" = true ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}"
+
+  warm-proxy:
+    name: Warm proxy.golang.org and pkg.go.dev
+    needs: [verify, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: stable
+          cache: false
+      - name: Fetch the version through the module proxy
+        env:
+          VERSION: v${{ needs.verify.outputs.version }}
+          GOPROXY: https://proxy.golang.org
+          GOFLAGS: -mod=mod
+        run: |
+          set -euo pipefail
+          # A scratch directory with its own module: `go list -m` of a version makes the
+          # proxy fetch the tag from GitHub and cache it, which is what `go get` needs.
+          dir="$(mktemp -d)"
+          cd "$dir"
+          go mod init example.com/warm
+          for attempt in 1 2 3 4 5 6; do
+            if go list -m "github.com/Vaquill-AI/vaquill-sdks/go@${VERSION}"; then
+              exit 0
+            fi
+            echo "attempt $attempt failed, the proxy may not see the tag yet; waiting"
+            sleep 20
+          done
+          echo "::error::proxy.golang.org did not serve github.com/Vaquill-AI/vaquill-sdks/go@${VERSION}"
+          exit 1
+      - name: Ask pkg.go.dev to index the version
+        env:
+          VERSION: v${{ needs.verify.outputs.version }}
+        run: |
+          # Best effort: pkg.go.dev also picks the version up on its own, so a failure here
+          # is a warning, not a failed release.
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            "https://pkg.go.dev/fetch/github.com/Vaquill-AI/vaquill-sdks/go@${VERSION}" || true)"
+          echo "pkg.go.dev fetch request answered ${code}"
+          case "$code" in
+            2??|3??) ;;
+            *) echo "::warning::pkg.go.dev answered ${code}; request the version by hand at https://pkg.go.dev/github.com/Vaquill-AI/vaquill-sdks/go" ;;
+          esac

@@ -1,0 +1,97 @@
+name: go-ci
+
+on:
+  push:
+    paths:
+      - "go/**"
+      - "openapi/**"
+      - ".github/workflows/go-ci.yml"
+  pull_request:
+    paths:
+      - "go/**"
+      - "openapi/**"
+      - ".github/workflows/go-ci.yml"
+  # Reused by go-release.yml so a tag is only released after these checks pass on it.
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # Never let the go command download a newer toolchain than the matrix entry asked for,
+  # or the "minimum" job would silently test a newer Go.
+  GOTOOLCHAIN: local
+  # Pinned: a floating staticcheck turns an unrelated upstream release into a red build.
+  STATICCHECK_VERSION: "2026.2.2"
+
+jobs:
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # "minimum" is the go directive of go/go.mod, read below and compared with this entry.
+        go: ["1.23.0", "oldstable", "stable"]
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: go/go.mod
+      - name: the matrix minimum is the go directive of go.mod
+        if: matrix.go == '1.23.0'
+        run: |
+          directive="$(sed -n 's/^go \([0-9.]*\)$/\1/p' go.mod)"
+          if [ "$directive" != "1.23.0" ]; then
+            echo "::error::go.mod says go $directive but the minimum job tests 1.23.0; change both together"
+            exit 1
+          fi
+      - run: go version
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -race -count=1 -coverprofile=cover.out ./...
+      - name: coverage
+        run: go tool cover -func=cover.out | tail -n 1
+      - name: live build tag still compiles
+        run: go vet -tags live ./...
+
+  lint:
+    name: lint and generated code (stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: stable
+          cache-dependency-path: go/go.mod
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "These files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
+      - name: staticcheck
+        run: |
+          go install "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}"
+          "$(go env GOPATH)/bin/staticcheck" ./...
+          "$(go env GOPATH)/bin/staticcheck" -tags live ./...
+      - name: generated code is up to date
+        run: |
+          go generate ./...
+          git diff --exit-code -- .

@@ -1,0 +1,199 @@
+name: Kotlin release
+
+# Push a tag to publish. Nothing publishes without a reviewer approving the
+# protected GitHub Environment named "maven-central".
+#
+#   kotlin-v0.1.0-rc.1 (any -suffix)  ->  published to Maven Central, GitHub Release marked pre-release
+#   kotlin-v0.1.0                     ->  published to Maven Central, GitHub Release marked latest
+#
+# Maven Central versions are immutable: a published version can never be changed or
+# deleted, so a bad release is fixed by the next version number.
+#
+# Auth: the Sonatype Central Portal. The environment "maven-central" holds four secrets,
+# set up once by the owner (see kotlin/RELEASING.md):
+#   ORG_GRADLE_PROJECT_signingInMemoryKey          ASCII-armored GPG private key
+#   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword  its passphrase
+#   ORG_GRADLE_PROJECT_centralUsername             Central Portal user token, name part
+#   ORG_GRADLE_PROJECT_centralPassword             Central Portal user token, password part
+# Gradle turns every ORG_GRADLE_PROJECT_x environment variable into the project property x,
+# which is exactly what kotlin/build.gradle.kts reads.
+on:
+  push:
+    tags: ["kotlin-v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Full Kotlin CI on the tagged commit
+    uses: ./.github/workflows/kotlin-ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: Build and verify jars
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      version: ${{ steps.classify.outputs.version }}
+      contract: ${{ steps.classify.outputs.contract }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Classify the tag and verify it
+        id: classify
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^kotlin-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=false
+          elif [[ "$TAG" =~ ^kotlin-v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]]; then
+            prerelease=true
+          else
+            echo "::error::Tag '$TAG' is not kotlin-vX.Y.Z or a semver pre-release (kotlin-vX.Y.Z-rc.1)"
+            exit 1
+          fi
+          version="${TAG#kotlin-v}"
+          gradle_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' kotlin/build.gradle.kts | head -n 1)"
+          if [ "$gradle_version" != "$version" ]; then
+            echo "::error::Tag is $version but kotlin/build.gradle.kts says '$gradle_version'"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Tagged commit is not on $DEFAULT_BRANCH"
+            exit 1
+          fi
+          contract="$(grep -v '^[[:space:]]*#' CONTRACT_VERSION | head -n 1 | tr -d '[:space:]')"
+          {
+            echo "prerelease=$prerelease"
+            echo "version=$version"
+            echo "contract=$contract"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build, test and assemble the jars
+        working-directory: kotlin
+        run: ./gradlew build --no-daemon --console=plain
+      - name: The javadoc jar holds real documentation
+        working-directory: kotlin
+        run: |
+          set -euo pipefail
+          n="$(unzip -l "build/libs/vaquill-kotlin-${{ steps.classify.outputs.version }}-javadoc.jar" | grep -c 'ai/vaquill/sdk/.*\.html' || true)"
+          echo "javadoc jar: $n API pages"
+          [ "$n" -gt 10 ]
+      - name: Collect the jars
+        working-directory: kotlin
+        run: |
+          mkdir dist
+          cp build/libs/*.jar dist/
+          sha256sum dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kotlin-dist
+          path: kotlin/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Sign and publish to Maven Central
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: maven-central
+      url: https://central.sonatype.com/artifact/ai.vaquill/vaquill-kotlin/${{ needs.build.outputs.version }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Refuse to publish unsigned or without credentials
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+          ORG_GRADLE_PROJECT_centralUsername: ${{ secrets.ORG_GRADLE_PROJECT_centralUsername }}
+          ORG_GRADLE_PROJECT_centralPassword: ${{ secrets.ORG_GRADLE_PROJECT_centralPassword }}
+        run: |
+          set -euo pipefail
+          for name in ORG_GRADLE_PROJECT_signingInMemoryKey ORG_GRADLE_PROJECT_signingInMemoryKeyPassword \
+                      ORG_GRADLE_PROJECT_centralUsername ORG_GRADLE_PROJECT_centralPassword; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Secret $name is empty on the maven-central environment (see kotlin/RELEASING.md)"
+              exit 1
+            fi
+          done
+      # Uploads the signed artifacts to the Central Portal's OSSRH staging API.
+      # build.gradle.kts registers that repository only when both central properties exist,
+      # and signs only when the signing key property exists.
+      - name: Upload signed artifacts to the staging repository
+        working-directory: kotlin
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKey }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.ORG_GRADLE_PROJECT_signingInMemoryKeyPassword }}
+          ORG_GRADLE_PROJECT_centralUsername: ${{ secrets.ORG_GRADLE_PROJECT_centralUsername }}
+          ORG_GRADLE_PROJECT_centralPassword: ${{ secrets.ORG_GRADLE_PROJECT_centralPassword }}
+        run: ./gradlew publishAllPublicationsToCentralRepository --no-daemon --console=plain
+      # The staging API only holds the upload. This call hands the staged repository to the
+      # Central Portal for validation and (publishing_type=automatic) release. It must run from
+      # the same IP as the upload, which is why both steps are in one job.
+      # Use publishing_type=user_managed instead to finish with a manual click in the Portal.
+      - name: Hand the staged repository to the Central Portal
+        env:
+          CENTRAL_USERNAME: ${{ secrets.ORG_GRADLE_PROJECT_centralUsername }}
+          CENTRAL_PASSWORD: ${{ secrets.ORG_GRADLE_PROJECT_centralPassword }}
+        run: |
+          set -euo pipefail
+          token="$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')"
+          echo "::add-mask::$token"
+          printf 'header = "Authorization: Bearer %s"\n' "$token" | curl --silent --show-error --fail-with-body \
+            --config - --request POST \
+            "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/ai.vaquill?publishing_type=automatic"
+          echo "Handed to the Central Portal. Track it at https://central.sonatype.com/publishing/deployments" >> "$GITHUB_STEP_SUMMARY"
+
+  github-release:
+    name: GitHub Release
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kotlin-dist
+          path: dist/
+      - name: Create the release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          CONTRACT: ${{ needs.build.outputs.contract }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="Maven coordinates: ai.vaquill:vaquill-kotlin:${VERSION}. API contract version: ${CONTRACT}."
+          args=(--verify-tag --title "$TAG" --generate-notes --notes "$notes")
+          if [ "$PRERELEASE" = true ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" dist/* "${args[@]}"

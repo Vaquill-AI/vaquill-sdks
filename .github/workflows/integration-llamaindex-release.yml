@@ -1,0 +1,141 @@
+name: Integration LlamaIndex release
+
+# Push a tag to publish llama-index-tools-vaquill to PyPI. Nothing publishes without a reviewer approving the
+# protected GitHub Environment named "pypi-llamaindex".
+#
+#   llama-index-tools-vaquill-v0.1.0         ->  PyPI (stable)
+#   llama-index-tools-vaquill-v0.2.0rc1      ->  PyPI as a PEP 440 pre-release (a, b or rc)
+#
+# The version in llama_index/tools/vaquill/_version.py must equal the tag.
+# Owner-only one-time PyPI setup: integrations/llamaindex/RELEASING.md.
+#
+# Auth: PyPI Trusted Publishing (OIDC). No API token is stored anywhere.
+# The pending publisher on pypi.org must name this repository, the workflow file
+# "integration-llamaindex-release.yml" and the environment "pypi-llamaindex".
+on:
+  push:
+    tags: ["llama-index-tools-vaquill-v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-llama-index-tools-vaquill-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Full CI on the tagged commit
+    uses: ./.github/workflows/integration-llamaindex-ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: Build distributions
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      version: ${{ steps.classify.outputs.version }}
+    defaults:
+      run:
+        working-directory: integrations/llamaindex
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the tag and verify it
+        id: classify
+        env:
+          TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG" =~ ^llama-index-tools-vaquill-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=false
+          elif [[ "$TAG" =~ ^llama-index-tools-vaquill-v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
+            prerelease=true
+          else
+            echo "::error::Tag '$TAG' is not llama-index-tools-vaquill-vX.Y.Z or a PEP 440 pre-release (aN, bN, rcN)"
+            exit 1
+          fi
+          version="${TAG#llama-index-tools-vaquill-v}"
+          file_version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' llama_index/tools/vaquill/_version.py)"
+          if [ "$file_version" != "$version" ]; then
+            echo "::error::Tag is $version but llama_index/tools/vaquill/_version.py is '$file_version'"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Tagged commit is not on $DEFAULT_BRANCH"
+            exit 1
+          fi
+          {
+            echo "prerelease=$prerelease"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Build and check
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+          sha256sum dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Smoke-test the built wheel in a clean environment
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/python -m pip install dist/*.whl
+          /tmp/wheel-venv/bin/python -c "from llama_index.tools.vaquill import VaquillToolSpec; from llama_index.retrievers.vaquill import VaquillRetriever; print(VaquillToolSpec, VaquillRetriever)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: integrations/llamaindex/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi-llamaindex
+      url: https://pypi.org/project/llama-index-tools-vaquill/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    name: GitHub Release
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Create the release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=(--verify-tag --title "$TAG" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" dist/* "${args[@]}"

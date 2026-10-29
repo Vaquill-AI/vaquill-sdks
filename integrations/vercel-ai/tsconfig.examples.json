@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": { "@vaquill-ai/ai-sdk": ["./src/index.ts"] }
+  },
+  "include": ["examples"]
+}

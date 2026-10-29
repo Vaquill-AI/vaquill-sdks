@@ -1,0 +1,56 @@
+name: Java CI
+
+# Standalone workflow for the Java SDK. It does not touch ci.yml.
+# Also reused by java-release.yml so a tag is only published after this passes.
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "java/**"
+      - "openapi/**"
+      - ".github/workflows/java-ci.yml"
+  pull_request:
+    paths:
+      - "java/**"
+      - "openapi/**"
+      - ".github/workflows/java-ci.yml"
+
+permissions: {}
+
+concurrency:
+  group: java-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Maven verify (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["11", "17", "21"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+          cache-dependency-path: java/pom.xml
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Generated models match the spec
+        run: python3 java/tools/generate.py --check
+      - name: Build, test and enforce 85% line coverage
+        working-directory: java
+        run: mvn -B -ntp verify
+      - name: Javadoc builds cleanly
+        working-directory: java
+        run: mvn -B -ntp javadoc:javadoc

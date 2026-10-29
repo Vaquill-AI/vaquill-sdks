@@ -1,0 +1,85 @@
+name: Integration CI (Vercel AI SDK)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/vercel-ai/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-vercel-ai-ci.yml"
+  pull_request:
+    paths:
+      - "integrations/vercel-ai/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-vercel-ai-ci.yml"
+  # Reused by integration-vercel-ai-release.yml so a tag is only published after this passes.
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: integration-vercel-ai-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: "ai ${{ matrix.ai }}, Node ${{ matrix.node }}${{ matrix.zod && format(', zod {0}', matrix.zod) || '' }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # Measured, not assumed (see RELEASING.md): the package supports ai 5.0.15+, 6 and 7 on
+      # Node 20 or newer, but ai 7 itself declares Node >=22, so ai 7 is not run on Node 20.
+      # 5.0.15 is the oldest ai 5 that passes the suite (5.0.0 and 5.0.10 fail it).
+      matrix:
+        include:
+          - { ai: "5.0.15", node: "20" }
+          - { ai: "5", node: "20" }
+          - { ai: "5", node: "22" }
+          - { ai: "5", node: "24" }
+          - { ai: "6", node: "20" }
+          - { ai: "6", node: "22" }
+          - { ai: "6", node: "24" }
+          - { ai: "7", node: "22" }
+          - { ai: "7", node: "24" }
+          - { ai: "6", node: "22", zod: "3.25.76" }
+    defaults:
+      run:
+        working-directory: integrations/vercel-ai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: integrations/vercel-ai/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Use the ai major (and zod) under test
+        env:
+          AI: ${{ matrix.ai }}
+          ZOD: ${{ matrix.zod }}
+        run: |
+          set -euo pipefail
+          pkgs=("ai@$AI")
+          if [ -n "$ZOD" ]; then pkgs+=("zod@$ZOD"); fi
+          npm install --no-save --no-audit --no-fund "${pkgs[@]}"
+          npm ls ai zod --depth=0
+      - name: Biome
+        run: npm run lint
+      - name: Type check
+        run: npm run typecheck
+      # The README snippets target the current ai major (isStepCount), so they compile on ai 7 only.
+      - name: Type check the README examples (Next.js route handler and the rest)
+        if: matrix.ai == '7'
+        run: npm run typecheck:examples
+      - name: Test (fake server, no live calls) with coverage
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: publint and Are the types wrong
+        run: npm run lint:package

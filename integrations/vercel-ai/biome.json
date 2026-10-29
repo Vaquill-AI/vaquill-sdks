@@ -1,0 +1,16 @@
+{
+  "formatter": { "indentStyle": "space", "lineWidth": 100 },
+  "files": {
+    "includes": [
+      "src/**",
+      "test/**",
+      "*.json",
+      "*.ts",
+      "!src/_generated",
+      "!openapi",
+      "!dist",
+      "!node_modules"
+    ]
+  },
+  "linter": { "rules": { "recommended": true, "suspicious": { "noExplicitAny": "off" } } }
+}

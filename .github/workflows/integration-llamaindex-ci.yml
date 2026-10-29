@@ -1,0 +1,110 @@
+name: Integration LlamaIndex CI
+
+# Standalone check for integrations/llamaindex. It is not part of ci.yml.
+# Python 3.10 is not in the matrix: the vaquill SDK requires Python 3.11 or newer.
+on:
+  # Called by integration-llamaindex-release.yml on a tag.
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/llamaindex/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-llamaindex-ci.yml"
+  pull_request:
+    paths:
+      - "integrations/llamaindex/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-llamaindex-ci.yml"
+
+permissions: {}
+
+concurrency:
+  group: integration-llamaindex-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Ruff and pyright
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: integrations/llamaindex
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e ".[dev]"
+      - name: Ruff format
+        run: .venv/bin/python -m ruff format --check .
+      - name: Ruff lint
+        run: .venv/bin/python -m ruff check .
+      - name: Pyright
+        run: .venv/bin/python -m pyright
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: integrations/llamaindex
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e ".[dev]"
+      # Offline only: a local fake HTTP server, no VAQUILL_API_KEY, no live calls.
+      # Fails under 85 percent coverage (see [tool.coverage.report] in pyproject.toml).
+      - name: Pytest
+        run: .venv/bin/python -m pytest --cov --cov-report=term-missing
+
+  # The declared lower bounds must actually work: install exactly the minimums (see pyproject.toml).
+  test-minimum-deps:
+    name: Tests (lowest supported dependencies, Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: integrations/llamaindex
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install "llama-index-core==0.12.38" "vaquill==0.2.0" \
+            pytest pytest-asyncio pytest-cov
+          .venv/bin/python -m pip install --no-deps -e .
+      - name: Pytest
+        run: .venv/bin/python -m pytest --cov --cov-report=term-missing

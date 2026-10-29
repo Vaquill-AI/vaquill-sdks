@@ -31,8 +31,10 @@ def _key(secret: str) -> bytes:
     if secret.startswith(SECRET_PREFIX):
         try:
             return base64.b64decode(secret[len(SECRET_PREFIX) :], validate=True)
-        except (binascii.Error, ValueError):
-            pass
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError(
+                "The webhook secret starts with 'whsec_' but is not valid base64."
+            ) from exc
     return secret.encode("utf-8")
 
 

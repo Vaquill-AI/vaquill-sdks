@@ -1,0 +1,86 @@
+name: Integration LangChain CI
+
+on:
+  # Called by integration-langchain-release.yml on a tag.
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/langchain/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-langchain-ci.yml"
+  pull_request:
+    paths:
+      - "integrations/langchain/**"
+      - "openapi/vaquill-us.json"
+      - ".github/workflows/integration-langchain-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-langchain-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: integrations/langchain
+
+jobs:
+  lint-and-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: integrations/langchain/pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pyright
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The vaquill SDK itself requires Python 3.11 or newer.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: integrations/langchain/pyproject.toml
+      - run: pip install -e ".[dev]"
+      # Live tests are deselected by the default addopts (-m 'not live'). Coverage fails under 85%.
+      - run: pytest
+        env:
+          CI: "true"
+
+  # The declared lower bounds must actually work: install exactly the minimums (see pyproject.toml).
+  test-minimum-deps:
+    name: Tests (lowest supported dependencies, Python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - run: |
+          pip install "langchain-core==0.3.36" "pydantic==2.7.4" "vaquill==0.2.0" \
+            pytest pytest-asyncio pytest-cov
+          pip install --no-deps -e .
+      # tests/test_agent_example.py skips itself here: create_agent needs langchain>=1.0.
+      - run: pytest
+        env:
+          CI: "true"

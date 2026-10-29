@@ -1,0 +1,59 @@
+name: Kotlin CI
+
+# Standalone workflow for the Kotlin SDK. It does not touch ci.yml.
+# kotlin-release.yml calls it (workflow_call) as the full check on a release tag.
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "kotlin/**"
+      - "openapi/**"
+      - ".github/workflows/kotlin-ci.yml"
+  pull_request:
+    paths:
+      - "kotlin/**"
+      - "openapi/**"
+      - ".github/workflows/kotlin-ci.yml"
+
+permissions: {}
+
+concurrency:
+  group: kotlin-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Gradle build (JDK ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["11", "17", "21"]
+    defaults:
+      run:
+        working-directory: kotlin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: gradle
+      - name: Models match the OpenAPI contract
+        run: python3 tools/generate_models.py --check
+      - name: Build, test and verify coverage (live smoke tests are excluded)
+        run: ./gradlew build --no-daemon --console=plain
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kotlin-reports-jdk${{ matrix.java }}
+          path: |
+            kotlin/build/reports/tests
+            kotlin/build/test-results

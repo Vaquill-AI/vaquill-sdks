@@ -140,3 +140,9 @@ def test_valid_signature_with_non_event_body_raises_payload_error() -> None:
         verify_webhook(body, headers(sign("s", body)), "s", now=NOW)
     with pytest.raises(WebhookVerificationError, match="No matching"):
         verify_webhook(body, headers("v1,wrong"), "s", now=NOW)
+
+
+def test_whsec_secret_that_is_not_base64_is_refused() -> None:
+    # Falling back to the literal text as the key would verify nothing the sender signed.
+    with pytest.raises(ValueError, match="base64"):
+        verify_webhook(EVENT, headers(sign(SECRET, EVENT)), "whsec_not*base64!", now=NOW)
