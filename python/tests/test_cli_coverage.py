@@ -731,3 +731,113 @@ def test_help_for_every_new_command_is_plain() -> None:
 
     walk(parser)
     assert seen > 40
+
+
+# ---- session-laws body --all (streams every page) ---------------------------------------
+
+BODY_TEXT = ["AAA ", "BBB ", "CCC"]
+
+
+def body_pages(request: httpx.Request) -> httpx.Response:
+    """Three pages of text addressed by cursor, built on the spec's example response."""
+    n = int(request.url.params.get("cursor", "0"))
+    data: dict[str, Any] = json.loads(spec_server(request).content)
+    last = n == len(BODY_TEXT) - 1
+    data.update(
+        text=BODY_TEXT[n],
+        pageEnd=4 * (n + 1) - (1 if last else 0),
+        totalChars=11,
+        hasMore=not last,
+        creditsConsumed=6,
+    )
+    data.pop("nextCursor", None)
+    if not last:
+        data["nextCursor"] = str(n + 1)
+    return httpx.Response(200, json=data)
+
+
+def test_session_law_body_all_prints_the_concatenated_text(run: Callable[..., Run]) -> None:
+    r = run("session-laws", "body", "us1_x", "--all", handler=body_pages)
+    assert r.code == 0, r.err
+    assert r.out == "AAA BBB CCC\n"
+    assert len(r.requests) == 3
+    assert [q.url.params.get("cursor") for q in r.requests] == [None, "1", "2"]
+    assert "page 3" in r.err and "credits used: 18" in r.err
+    assert KEY not in r.out + r.err
+
+
+def test_session_law_body_all_json_is_one_object_per_page(run: Callable[..., Run]) -> None:
+    r = run("--json", "session-laws", "body", "us1_x", "--all", handler=body_pages)
+    assert r.code == 0, r.err
+    lines = r.out.splitlines()
+    pages = [json.loads(line) for line in lines]
+    assert [p["text"] for p in pages] == BODY_TEXT
+    assert [p["hasMore"] for p in pages] == [True, True, False]
+    assert all("\n" not in line for line in lines)
+
+
+def test_session_law_body_max_pages_implies_all_and_warns(run: Callable[..., Run]) -> None:
+    r = run("session-laws", "body", "us1_x", "--max-pages", "2", handler=body_pages)
+    assert r.code == 0, r.err
+    assert r.out == "AAA BBB \n" and len(r.requests) == 2
+    assert "stopped at --max-pages" in r.err
+
+
+def test_session_law_body_all_passes_flags_and_rejects_a_cursor(run: Callable[..., Run]) -> None:
+    r = run(
+        "session-laws", "body", "us1_x", "--all", "--start-char", "5", "--version", "2",
+        "--include-unverified", "--expect-text-sha256", "abc", handler=body_pages,
+    )  # fmt: skip
+    first = r.requests[0].url.params
+    assert first["startChar"] == "5" and first["version"] == "2"
+    assert first["includeUnverified"] == "true" and first["expectTextSha256"] == "abc"
+    assert "startChar" not in r.requests[1].url.params
+    bad = run("session-laws", "body", "us1_x", "--all", "--cursor", "c", handler=None)
+    assert bad.code == 2 and bad.requests == []
+
+
+def test_session_law_body_all_honours_the_spend_guard(run: Callable[..., Run]) -> None:
+    r = run("session-laws", "body", "us1_x", "--all", "--max-credits", "7", handler=body_pages)
+    assert r.code == 4 and r.err.count("error:") == 1
+    assert len(r.requests) == 2 and r.out == "AAA BBB "
+    zero = run("--json", "session-laws", "body", "us1_x", "--all", "--max-credits", "0")
+    assert zero.code == 4 and zero.requests == [] and zero.out == ""
+
+
+def test_session_law_body_all_reports_sdk_errors_without_the_key(run: Callable[..., Run]) -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("cursor"):
+            return httpx.Response(404, json={"detail": "gone"})
+        return body_pages(request)
+
+    r = run("session-laws", "body", "us1_x", "--all", "--max-retries", "0", handler=fail)
+    assert r.code == 6 and r.out.startswith("AAA ") and r.err.count("error:") == 1
+    assert KEY not in r.out + r.err
+    unauth = run("session-laws", "body", "us1_x", "--all", handler=reply({}, 401))
+    assert unauth.code == 3 and KEY not in unauth.err
+
+
+def test_session_law_body_without_all_is_still_one_page(run: Callable[..., Run]) -> None:
+    r = run("session-laws", "body", "us1_x", handler=body_pages)
+    assert r.code == 0 and len(r.requests) == 1 and r.out.startswith("AAA")
+    assert "more pages of text exist" in r.err
+
+
+# ---- batch commands: --all chunks past the per-call cap ---------------------------------
+
+
+def test_batch_commands_all_split_into_chunks(run: Callable[..., Run]) -> None:
+    ids = [f"S{i}" for i in range(120)]
+    r = run("statutes", "sections", *ids, "--all", "--json", handler=reply({"sections": []}))
+    assert r.code == 0, r.err
+    sizes = [len(json.loads(q.content)["actIds"]) for q in r.requests]
+    assert sizes == [50, 50, 20] and r.json() == {"sections": [], "count": 0}
+    cites = [f"{i} USC 1" for i in range(1, 601)]
+    c = run("statutes", "resolve-batch", *cites, "--all", "--json", handler=reply({"results": []}))
+    assert [len(json.loads(q.content)["citations"]) for q in c.requests] == [500, 100]
+    laws = run(
+        "session-laws", "batch", *[f"L{i}" for i in range(250)], "--all", "--json",
+        handler=reply({"laws": []}),
+    )  # fmt: skip
+    assert laws.code == 0, laws.err
+    assert [len(json.loads(q.content)["ids"]) for q in laws.requests] == [200, 50]

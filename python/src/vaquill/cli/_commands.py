@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -131,9 +132,24 @@ def _ids(args: argparse.Namespace, positional: str, what: str) -> list[str]:
     return values
 
 
-def _add_ids(p: argparse.ArgumentParser, dest: str, metavar: str, what: str) -> None:
+def _add_ids(
+    p: argparse.ArgumentParser, dest: str, metavar: str, what: str, *, chunked: bool = True
+) -> None:
     p.add_argument(dest, nargs="*", metavar=metavar, help=f"One or more {what}.")
     p.add_argument("--file", metavar="PATH", help=f"Read {what}, one per line (- for stdin).")
+    if chunked:
+        p.add_argument(
+            "--all",
+            action="store_true",
+            help="Accept more than one call's cap: split into as many calls as needed.",
+        )
+
+
+def _flat(models: list[Any], key: str) -> Result:
+    """The flat list a chunking SDK helper returns, shaped like a paged result."""
+    items = [dump(m) for m in models]
+    data = {key: items, "count": len(items)}
+    return result(data, list_key=key)
 
 
 def json_object(text: str | None, flag: str) -> dict[str, Any] | None:
@@ -253,14 +269,20 @@ CHANGES_FLAGS = (
 def _resolve_batch(s: Session) -> Result:
     a = s.args
     cites = _ids(a, "citations", "citation")
-    data = dump(s.client.statutes.resolve_batch(cites, **kw(a, ("state", "corpus_type"))))
+    options = kw(a, ("state", "corpus_type"))
+    if a.all:
+        return _flat(s.client.statutes.resolve_batch_all(cites, **options), "results")
+    data = dump(s.client.statutes.resolve_batch(cites, **options))
     return result(data, list_key="results", cols=None)
 
 
 def _sections(s: Session) -> Result:
     a = s.args
     ids = _ids(a, "act_ids", "act id")
-    data = dump(s.client.statutes.get_sections_batch(ids, **kw(a, ("include_body",))))
+    options = kw(a, ("include_body",))
+    if a.all:
+        return _flat(s.client.statutes.get_sections_all(ids, **options), "sections")
+    data = dump(s.client.statutes.get_sections_batch(ids, **options))
     return result(data, list_key="sections")
 
 
@@ -507,8 +529,42 @@ def _sl_get(s: Session) -> Result:
     return result(dump(s.client.session_laws.get(a.session_law_id, **kw(a, ("jurisdiction",)))))
 
 
+def _sl_body_all(s: Session) -> Result:
+    """Stream every page: NDJSON with --json, else the concatenated text (progress on stderr)."""
+    a = s.args
+    forbid(a, "cursor")
+    pager = s.client.session_laws.iter_body(
+        a.session_law_id,
+        max_pages=a.max_pages,
+        **kw(a, ("start_char", "expect_text_sha256", "version", "include_unverified")),
+    )
+    pages = 0
+    last = ""
+    for page in pager:
+        pages += 1
+        data = dump(page)
+        if a.json:
+            sys.stdout.write(json.dumps(data, ensure_ascii=False) + "\n")
+        else:
+            last = str(data.get("text") or "")
+            sys.stdout.write(last)
+            end, total = data.get("pageEnd"), data.get("totalChars")
+            where = f", chars to {end} of {total}" if end is not None and total is not None else ""
+            print(f"page {pages}{where}", file=sys.stderr)
+        sys.stdout.flush()
+    if pages and not a.json and not last.endswith("\n"):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    notice = None
+    if pager.truncated:
+        notice = "notice: stopped at --max-pages; more text exists. Raise --max-pages or use --all."
+    return Result(None, lambda ui: "", charged=True, notice=notice, printed=True)
+
+
 def _sl_body(s: Session) -> Result:
     a = s.args
+    if a.all or a.max_pages is not None:
+        return _sl_body_all(s)
     data = dump(s.client.session_laws.get_body(a.session_law_id, **kw(a, names(SL_BODY_FLAGS))))
     return Result(
         data,
@@ -525,7 +581,10 @@ def _sl_versions(s: Session) -> Result:
 def _sl_batch(s: Session) -> Result:
     a = s.args
     ids = _ids(a, "ids", "session law id")
-    data = dump(s.client.session_laws.get_batch(ids, **kw(a, ("jurisdiction", "include_body"))))
+    options = kw(a, ("jurisdiction", "include_body"))
+    if a.all:
+        return _flat(s.client.session_laws.get_batch_all(ids, **options), "results")
+    data = dump(s.client.session_laws.get_batch(ids, **options))
     return result(data, list_key="results")
 
 
@@ -561,9 +620,12 @@ def register_session_laws(group: Group, add: Add) -> None:
     p.add_argument("session_law_id", metavar="ID", help="A session law id or citation.")
     p.add_argument("--jurisdiction", help="State, needed when a citation has none.")
 
-    p = add(sub, "body", _sl_body, "Print one page of a session law's text.")
+    p = add(sub, "body", _sl_body, "Print a session law's text, one page or all pages with --all.")
     p.add_argument("session_law_id", metavar="ID")
     declare(p, SL_BODY_FLAGS)
+    g = p.add_argument_group("paging")
+    g.add_argument("--all", action="store_true", help="Stream every page (6 credits each).")
+    g.add_argument("--max-pages", type=int, metavar="N", help="Stop after N pages (implies --all).")
 
     p = add(sub, "versions", _sl_versions, "List every version of a session law.")
     p.add_argument("session_law_id", metavar="ID")

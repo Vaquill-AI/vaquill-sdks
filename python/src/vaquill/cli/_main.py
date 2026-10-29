@@ -658,7 +658,8 @@ def main(argv: Sequence[str] | None = None, *, _client_factory: ClientFactory | 
         finally:
             session.close()
 
-        print(json_text(result.payload) if args.json else result.human(ui))
+        if not result.printed:
+            print(json_text(result.payload) if args.json else result.human(ui))
         if result.notice:
             print(paint(result.notice, "yellow", err_color), file=sys.stderr)
         if result.charged:

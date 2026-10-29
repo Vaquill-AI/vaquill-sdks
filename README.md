@@ -12,7 +12,23 @@ Official client libraries for the Vaquill US Data API: primary law (statutes, re
 | Python 3.11+ | [`vaquill`](https://pypi.org/project/vaquill/) | `pip install vaquill` | [python/README.md](python/README.md) |
 | TypeScript, built on standard `fetch`, CI-tested on Node 20, 22 and 24 | [`@vaquill-ai/sdk`](https://www.npmjs.com/package/@vaquill-ai/sdk) | `npm install @vaquill-ai/sdk` | [js/README.md](js/README.md) |
 
-Both packages share the same behavior: retries with backoff, idempotency keys on charged calls, a spend guard, typed errors, pagination helpers and webhook signature verification.
+More languages are built and tested in this repository but are **not yet published** to a package registry. Until a release is tagged, install them from source (each README says how).
+
+| Language | Package | Status | Package README |
+| --- | --- | --- | --- |
+| Go 1.23+ | `github.com/Vaquill-AI/vaquill-sdks/go` | not yet published | [go/README.md](go/README.md) |
+| Java 11+ | `ai.vaquill:vaquill-sdk` | not yet published | [java/README.md](java/README.md) |
+| Kotlin (JVM 11+), coroutines and Flow | `ai.vaquill:vaquill-kotlin` | not yet published | [kotlin/README.md](kotlin/README.md) |
+
+Agent framework integrations, built on the Python and TypeScript SDKs (also not yet published):
+
+| Framework | Package | README |
+| --- | --- | --- |
+| LangChain | `langchain-vaquill` | [integrations/langchain/README.md](integrations/langchain/README.md) |
+| LlamaIndex | `llama-index-tools-vaquill` | [integrations/llamaindex/README.md](integrations/llamaindex/README.md) |
+| Vercel AI SDK | `@vaquill-ai/ai-sdk` | [integrations/vercel-ai/README.md](integrations/vercel-ai/README.md) |
+
+Every SDK shares the same behavior: retries with backoff, idempotency keys on charged calls, a spend guard, typed errors, pagination helpers and webhook signature verification.
 The Python package also installs a `vaquill` command line tool.
 
 ## Documentation
@@ -105,9 +121,11 @@ vaquill credits   # free
 
 ## Repository layout
 
-- `python/` and `js/`: the two packages, released independently (tags `python-vX.Y.Z` and `js-vX.Y.Z`).
+- `python/` and `js/`: the published packages, released independently (tags `python-vX.Y.Z` and `js-vX.Y.Z`).
+- `go/`, `java/` and `kotlin/`: the other SDKs (tags `go/vX.Y.Z`, `java-vX.Y.Z` and `kotlin-vX.Y.Z`). Each has a `RELEASING.md` with the one-time setup.
+- `integrations/`: LangChain, LlamaIndex and Vercel AI packages (tags `langchain-vaquill-vX.Y.Z`, `llama-index-tools-vaquill-vX.Y.Z` and `ai-sdk-vX.Y.Z`).
 - `openapi/vaquill-us.json`: the API contract both are built from. `CONTRACT_VERSION` records its version.
-- `.github/`: CI, CodeQL, OpenSSF Scorecard and the two release workflows.
+- `.github/`: CI per package, CodeQL, OpenSSF Scorecard and a release workflow per package.
 
 ## Support
 

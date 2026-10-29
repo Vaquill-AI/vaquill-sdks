@@ -34,6 +34,7 @@ class Result:
     human: Callable[[UI], str]
     charged: bool = False
     notice: str | None = None
+    printed: bool = False  # the handler already streamed its output; main prints nothing more
 
 
 def redact(text: str, key: str | None = None) -> str:

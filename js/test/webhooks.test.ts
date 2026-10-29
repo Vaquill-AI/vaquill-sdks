@@ -30,6 +30,13 @@ describe("Standard Webhooks", () => {
     await expect(verifyWebhook(BODY, headers(), SECRET, { now: TS })).resolves.toBeUndefined();
   });
 
+  it("refuses a whsec_ secret that is not valid base64 instead of using it as text", async () => {
+    await expect(verifyWebhook(BODY, headers(), "whsec_not*base64!", { now: TS })).rejects.toThrow(
+      /base64/,
+    );
+    await expect(signWebhook(ID, TS, BODY, "whsec_not*base64!")).rejects.toThrow(/base64/);
+  });
+
   it("accepts bytes and a Headers object", async () => {
     await verifyWebhook(new TextEncoder().encode(BODY), new Headers(headers()), SECRET, {
       now: TS,

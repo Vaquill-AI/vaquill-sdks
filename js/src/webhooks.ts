@@ -162,11 +162,19 @@ function hexDecode(s: string): Uint8Array<ArrayBuffer> | null {
   return out;
 }
 
-/** HMAC key for a stored secret: base64 decoded after `whsec_`, otherwise the UTF-8 bytes. */
+/**
+ * HMAC key for a stored secret: base64 decoded after `whsec_`, otherwise the UTF-8 bytes.
+ * A `whsec_` secret that is not valid base64 is refused, never used as literal text.
+ */
 export function deriveKey(secret: string): Uint8Array<ArrayBuffer> {
   if (secret.startsWith(SECRET_PREFIX)) {
     const decoded = b64decode(secret.slice(SECRET_PREFIX.length));
-    if (decoded) return decoded;
+    if (!decoded) {
+      throw new WebhookVerificationError(
+        "The webhook secret starts with 'whsec_' but is not valid base64.",
+      );
+    }
+    return decoded;
   }
   return enc.encode(secret) as Uint8Array<ArrayBuffer>;
 }
