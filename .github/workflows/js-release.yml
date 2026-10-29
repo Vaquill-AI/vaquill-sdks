@@ -137,7 +137,7 @@ jobs:
             export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/npmrc"
           fi
           npm --version
-          npm publish pack/*.tgz --provenance --access public --tag "$DIST_TAG"
+          npm publish ./pack/*.tgz --provenance --access public --tag "$DIST_TAG"
 
   github-release:
     name: GitHub Release
