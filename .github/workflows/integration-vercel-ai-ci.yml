@@ -68,7 +68,7 @@ jobs:
           pkgs=("ai@$AI")
           if [ -n "$ZOD" ]; then pkgs+=("zod@$ZOD"); fi
           npm install --no-save --no-audit --no-fund "${pkgs[@]}"
-          npm ls ai zod --depth=0
+          npm ls ai zod --depth=0 || true  # prints the versions under test; the "invalid" note for a non-default major is expected
       - name: Biome
         run: npm run lint
       - name: Type check

@@ -52,7 +52,7 @@ jobs:
       - name: Ruff lint
         run: .venv/bin/python -m ruff check .
       - name: Pyright
-        run: .venv/bin/python -m pyright
+        run: .venv/bin/python -m pyright --pythonpath .venv/bin/python
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
