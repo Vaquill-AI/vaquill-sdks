@@ -20,12 +20,12 @@ More languages are built and tested in this repository but are **not yet publish
 | Java 11+ | `ai.vaquill:vaquill-sdk` | not yet published | [java/README.md](java/README.md) |
 | Kotlin (JVM 11+), coroutines and Flow | `ai.vaquill:vaquill-kotlin` | not yet published | [kotlin/README.md](kotlin/README.md) |
 
-Agent framework integrations, built on the Python and TypeScript SDKs (also not yet published):
+Agent framework integrations, built on the Python and TypeScript SDKs. LangChain and LlamaIndex are published on PyPI; the Vercel AI SDK package is not yet published:
 
 | Framework | Package | README |
 | --- | --- | --- |
-| LangChain | `langchain-vaquill` | [integrations/langchain/README.md](integrations/langchain/README.md) |
-| LlamaIndex | `llama-index-tools-vaquill` | [integrations/llamaindex/README.md](integrations/llamaindex/README.md) |
+| LangChain | `langchain-vaquill` (PyPI 0.1.0) | [integrations/langchain/README.md](integrations/langchain/README.md) |
+| LlamaIndex | `llama-index-tools-vaquill` (PyPI 0.1.0) | [integrations/llamaindex/README.md](integrations/llamaindex/README.md) |
 | Vercel AI SDK | `@vaquill-ai/ai-sdk` | [integrations/vercel-ai/README.md](integrations/vercel-ai/README.md) |
 
 Every SDK shares the same behavior: retries with backoff, idempotency keys on charged calls, a spend guard, typed errors, pagination helpers and webhook signature verification.
