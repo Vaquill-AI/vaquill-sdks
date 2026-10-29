@@ -44,10 +44,13 @@ jobs:
         with:
           python-version: "3.12"
       # pyproject.toml points pyright at ./.venv, so the venv must live there.
+      # The dev group pins ruff, pyright, black and datamodel-code-generator, which
+      # the generator scripts and their drift tests import.
       - name: Install
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install -e . pytest pytest-asyncio ruff pyright
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e . --group dev
       - name: Ruff lint
         run: .venv/bin/ruff check .
       - name: Ruff format
@@ -79,7 +82,8 @@ jobs:
       - name: Install
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install -e . pytest pytest-asyncio
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e . --group dev
       - name: Pytest
         run: .venv/bin/python -m pytest
 
