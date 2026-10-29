@@ -3,7 +3,7 @@ name: Python release
 # Push a tag to publish. Nothing publishes without a reviewer approving the
 # protected GitHub Environment named "pypi".
 #
-#   python-v0.1.0a1 / b2 / rc1  ->  PyPI as a PEP 440 pre-release (pip skips it without --pre)
+#   python-v0.1.0a1 / b2 / rc1  ->  PyPI as a PEP 440 pre-release (pip skips it only once a stable version exists)
 #   python-v0.1.0               ->  PyPI (stable)
 #
 # There is no TestPyPI step (owner decision 2026-10-29).
