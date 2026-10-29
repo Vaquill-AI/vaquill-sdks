@@ -14,7 +14,7 @@ dependencies = ["httpx>=0.27,<1", "pydantic>=2,<3"]
 authors = [{ name = "Vaquill" }]
 keywords = ["vaquill", "legal", "law", "statutes", "regulations", "api", "sdk", "cli", "legal-data"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
