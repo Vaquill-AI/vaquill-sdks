@@ -22,4 +22,7 @@ regexes = [
   '''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''',
   '''vq_key_test_0123456789abcdef''',
   '''my-key-0123456789''',
+  '''explicit-key-0123456''',
+  '''key-0123456789abcdef''',
+  '''vq_key_other_0123456789abcdef''',
 ]
