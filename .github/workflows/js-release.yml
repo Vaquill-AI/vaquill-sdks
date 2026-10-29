@@ -113,7 +113,7 @@ jobs:
     timeout-minutes: 10
     environment:
       name: npm
-      url: https://www.npmjs.com/package/@vaquill/sdk
+      url: https://www.npmjs.com/package/@vaquill-ai/sdk
     permissions:
       id-token: write
     steps:

@@ -1,4 +1,4 @@
-# @vaquill/sdk
+# @vaquill-ai/sdk
 
 TypeScript client for the Vaquill US primary law Data API.
 It is a small handwritten layer over native `fetch` with zero runtime dependencies.
@@ -9,7 +9,7 @@ Use it on a server.
 An API key in browser code is readable by anyone, and the client warns when it sees a browser.
 
 ```ts
-import { Vaquill } from "@vaquill/sdk";
+import { Vaquill } from "@vaquill-ai/sdk";
 
 const client = new Vaquill(); // reads VAQUILL_API_KEY (must start with vq_key_)
 
@@ -95,7 +95,7 @@ Without one, an iterator runs until the data ends.
 ## Webhooks
 
 ```ts
-import { webhooks } from "@vaquill/sdk";
+import { webhooks } from "@vaquill-ai/sdk";
 
 const event = await webhooks.unwrap(rawBody, request.headers, process.env.WEBHOOK_SECRET!);
 ```

@@ -20,7 +20,7 @@ After 1.0, for each package the latest minor of the current and previous major v
 
 ## Scope
 
-In scope: the SDKs in this repository (`vaquill` on PyPI and `@vaquill/sdk` on npm), their release pipelines and their published packages.
+In scope: the SDKs in this repository (`vaquill` on PyPI and `@vaquill-ai/sdk` on npm), their release pipelines and their published packages.
 Out of scope: the Vaquill API service itself. Report API issues through the same channel and we will route them.
 
 ## Release integrity

@@ -8,7 +8,7 @@ This repository holds both SDKs and the API contract they are built from:
 | Path | What it is |
 | --- | --- |
 | `python/` | The `vaquill` package for PyPI, including the `vaquill` command line tool |
-| `js/` | The `@vaquill/sdk` package for npm |
+| `js/` | The `@vaquill-ai/sdk` package for npm |
 | `openapi/vaquill-us.json` | The one pinned copy of the US Data API contract, shared by both |
 | `CONTRACT_VERSION` | The contract version both SDKs were built from |
 
@@ -83,7 +83,7 @@ The two packages are versioned independently.
 3. The `Release (Python)` workflow runs the full CI matrix, builds once from the tagged commit, and waits for a reviewer to approve the protected `pypi` environment.
 4. After approval it publishes with PyPI Trusted Publishing (no stored token) and creates a GitHub Release with generated notes and the API contract version.
 
-**TypeScript (`@vaquill/sdk`)**
+**TypeScript (`@vaquill-ai/sdk`)**
 
 1. Bump `version` in `js/package.json` (`cd js && npm version --no-git-tag-version 0.1.0`) and merge it to the default branch.
 2. Tag the merged commit: `js-v0.1.0-rc.1` (any `-suffix` is a pre-release, goes to the `next` dist-tag) or `js-v0.1.0` (goes to `latest`).

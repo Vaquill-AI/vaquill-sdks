@@ -12,7 +12,7 @@ body:
       label: Package
       options:
         - "vaquill (Python)"
-        - "@vaquill/sdk (TypeScript)"
+        - "@vaquill-ai/sdk (TypeScript)"
         - "Both, or the OpenAPI contract"
     validations:
       required: true

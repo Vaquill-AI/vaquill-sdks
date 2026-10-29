@@ -5,7 +5,7 @@ Official client libraries for the Vaquill US Data API: primary law (statutes, re
 | Language | Package | Install | Docs |
 | --- | --- | --- | --- |
 | Python 3.11+ | [`vaquill`](python/) | `pip install vaquill` | [python/README.md](python/README.md) |
-| TypeScript, Node 20+ | [`@vaquill/sdk`](js/) | `npm install @vaquill/sdk` | [js/README.md](js/README.md) |
+| TypeScript, Node 20+ | [`@vaquill-ai/sdk`](js/) | `npm install @vaquill-ai/sdk` | [js/README.md](js/README.md) |
 
 Both read your key from `VAQUILL_API_KEY` and share the same behavior: retries with backoff, idempotency keys on charged calls, a spend guard, typed errors and webhook signature verification.
 The Python package also installs a `vaquill` command line tool.
