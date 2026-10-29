@@ -62,6 +62,16 @@ export function creditsFromBody(body: unknown): number | undefined {
   return typeof meta?.creditsConsumed === "number" ? meta.creditsConsumed : undefined;
 }
 
+/** The `Deprecation` and `Sunset` headers of a response, or null when it carries neither. */
+export function deprecationInfo(
+  headers: Headers,
+): { deprecation?: string; sunset?: string } | null {
+  const deprecation = headers.get("deprecation") ?? undefined;
+  const sunset = headers.get("sunset") ?? undefined;
+  if (deprecation === undefined && sunset === undefined) return null;
+  return { deprecation, sunset };
+}
+
 export function buildMeta(response: Response, body: unknown, retries: number): ResponseMeta {
   const { headers } = response;
   return {

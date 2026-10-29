@@ -7,6 +7,7 @@ from typing import Any, TypedDict, Unpack
 
 from .._pagination import CursorStyle, SyncPaginator
 from ..types import (
+    SessionLawBatchLaw,
     SessionLawBatchResponse,
     SessionLawBodyResponse,
     SessionLawChange,
@@ -18,9 +19,25 @@ from ..types import (
     SessionLawSummary,
     SessionLawVersionsResponse,
 )
-from ._base import HasMoreId, HasMoreOffset, RequestOptions, SyncResource, compact, seg, wire
+from ._base import (
+    HasMoreCursor,
+    HasMoreId,
+    HasMoreOffset,
+    RequestOptions,
+    SyncResource,
+    chunk_options,
+    chunked,
+    compact,
+    seg,
+    unique,
+    wire,
+)
 
 __all__ = ["SyncSessionLaws"]
+
+
+BATCH_MAX = 200
+"""Ids per ``POST /us/session-laws/batch`` call (``maxItems`` in the spec)."""
 
 
 class ListFilters(TypedDict, total=False):
@@ -287,6 +304,59 @@ class SyncSessionLaws(SyncResource):
             **options,
         )
 
+    def iter_body(
+        self,
+        session_law_id: str,
+        *,
+        start_char: int | None = None,
+        expect_text_sha256: str | None = None,
+        version: int | None = None,
+        include_unverified: bool | None = None,
+        max_pages: int | None = None,
+    ) -> SyncPaginator[SessionLawBodyResponse]:
+        """Read a law's text page by page, following ``nextCursor`` until ``hasMore`` is false.
+
+        Yields one :class:`SessionLawBodyResponse` per page; concatenate their ``text``. Every
+        page is charged (6 credits): a long act is hundreds of pages, so set ``max_pages``.
+        ``estimated_remaining_credits`` on a page tells you what the rest would cost. Stops when
+        ``hasMore`` is false, ``pageEnd`` reaches ``totalChars``, or the cursor stops advancing.
+        ``truncated`` is True when ``max_pages`` stopped it with text left.
+
+        Args:
+            session_law_id: The id.
+            start_char: Character offset to start from.
+            expect_text_sha256: Fail with 409 if the text changed since you hashed it.
+            version: A version number from :meth:`versions`.
+            include_unverified: Also serve text we have not verified.
+            max_pages: Stop after this many pages.
+        """
+
+        def fetch(params: dict[str, Any]) -> Any:
+            response = self._client.raw_request(
+                "GET",
+                f"/api/v1/us/session-laws/{seg(session_law_id)}/body",
+                params=params,
+                charged=True,
+            )
+            data = response.json()
+            return {**data, "_pages": [data]}
+
+        return SyncPaginator(
+            fetch,
+            style=HasMoreCursor(),
+            items_key="_pages",
+            params=wire(
+                {
+                    "start_char": start_char,
+                    "expect_text_sha256": expect_text_sha256,
+                    "version": version,
+                    "include_unverified": include_unverified,
+                }
+            ),
+            max_pages=max_pages,
+            parse=SessionLawBodyResponse.model_validate,
+        )
+
     def versions(
         self, session_law_id: str, **options: Unpack[RequestOptions]
     ) -> SessionLawVersionsResponse:
@@ -323,6 +393,42 @@ class SyncSessionLaws(SyncResource):
             charged=True,
             **options,
         )
+
+    def get_batch_all(
+        self,
+        ids: Sequence[str],
+        *,
+        jurisdiction: str | None = None,
+        include_body: bool | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> list[SessionLawBatchLaw]:
+        """Fetch any number of session laws by chunking :meth:`get_batch`. Charged.
+
+        Sends at most ``BATCH_MAX`` (200, the spec's per-call cap) ids per call and returns the
+        ``laws`` of every call as one flat list, in order. Exact repeats are sent once. The
+        ``max_credits`` spend guard is checked before each chunk, so a guard that is reached
+        part way raises ``SpendGuardExceeded`` and the later chunks are not sent. Ids with no
+        match are dropped (use :meth:`get_batch` to see ``notFound``).
+        A caller's ``idempotency_key`` is suffixed with the chunk number after the first chunk.
+
+        Args:
+            ids: Session law ids or citations.
+            jurisdiction: Default state for citations.
+            include_body: Include the text of each law.
+        """
+        laws: list[SessionLawBatchLaw] = []
+        for i, chunk in enumerate(chunked(unique(ids), BATCH_MAX)):
+            body = {"ids": chunk, "jurisdiction": jurisdiction, "includeBody": include_body}
+            response = self._client.request(
+                "POST",
+                "/api/v1/us/session-laws/batch",
+                cast_to=SessionLawBatchResponse,
+                json=compact(body),
+                charged=True,
+                **chunk_options(options, i),
+            )
+            laws.extend(response.laws or [])
+        return laws
 
     def changes(
         self,

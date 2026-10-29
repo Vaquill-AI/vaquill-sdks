@@ -12,7 +12,18 @@ export interface PaginationLimits {
   maxItems?: number;
 }
 
+/** A stable identity for a cursor, so a cycle (A, B, A) or a repeated offset can be spotted. */
+function cursorKey(cursor: unknown): string {
+  if (cursor !== null && typeof cursor === "object") return `o:${JSON.stringify(cursor)}`;
+  return `${typeof cursor}:${String(cursor)}`;
+}
+
 export class PageIterator<Item, Page, Cursor> implements AsyncIterable<Item> {
+  #truncated = false;
+  #stuck = false;
+  /** True when the page last yielded has a (not yet visited) successor. */
+  #moreAfterPage = false;
+
   constructor(
     private readonly first: Cursor,
     private readonly fetchPage: (cursor: Cursor) => Promise<Page>,
@@ -22,28 +33,73 @@ export class PageIterator<Item, Page, Cursor> implements AsyncIterable<Item> {
     private readonly limits: PaginationLimits = {},
   ) {}
 
+  /**
+   * True when the last walk stopped at `maxPages` or `maxItems` while the API still had more
+   * data. Read it after the loop; it is reset at the start of every walk.
+   */
+  get truncated(): boolean {
+    return this.#truncated;
+  }
+
+  /**
+   * True when the last walk stopped because the API handed back a cursor or offset it had
+   * already served (a cycle such as A, B, A, or an offset that does not advance). The walk
+   * stops instead of looping and billing every time. The data may be incomplete.
+   */
+  get stuck(): boolean {
+    return this.#stuck;
+  }
+
   /** Walk page by page, for callers who want to control cost. */
   async *pages(): AsyncGenerator<Page> {
     const { maxPages } = this.limits;
+    this.#truncated = false;
+    this.#stuck = false;
+    this.#moreAfterPage = false;
+    if (maxPages !== undefined && maxPages <= 0) {
+      this.#truncated = true;
+      return;
+    }
+    const seen = new Set<string>([cursorKey(this.first)]);
     let cursor: Cursor = this.first;
-    for (let n = 0; maxPages === undefined || n < maxPages; n++) {
+    for (let n = 1; ; n++) {
       const page = await this.fetchPage(cursor);
-      yield page;
       const next = this.nextOf(page, cursor);
-      // A cursor that does not advance would loop forever (and bill every time).
-      if (next === undefined || next === cursor) return;
+      const repeated = next !== undefined && seen.has(cursorKey(next));
+      this.#moreAfterPage = next !== undefined && !repeated;
+      yield page;
+      if (next === undefined) return;
+      // A cursor or offset already served would loop forever (and bill every time).
+      if (repeated) {
+        this.#stuck = true;
+        return;
+      }
+      if (maxPages !== undefined && n >= maxPages) {
+        this.#truncated = true;
+        return;
+      }
+      seen.add(cursorKey(next));
       cursor = next;
     }
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<Item> {
     const { maxItems } = this.limits;
-    if (maxItems !== undefined && maxItems <= 0) return;
+    if (maxItems !== undefined && maxItems <= 0) {
+      this.#truncated = true;
+      this.#stuck = false;
+      return;
+    }
     let count = 0;
     for await (const page of this.pages()) {
-      for (const item of this.itemsOf(page)) {
-        yield item;
-        if (maxItems !== undefined && ++count >= maxItems) return;
+      const items = this.itemsOf(page);
+      for (let i = 0; i < items.length; i++) {
+        yield items[i] as Item;
+        if (maxItems !== undefined && ++count >= maxItems) {
+          // The generator is closed here, so say now whether anything was left behind.
+          this.#truncated = i < items.length - 1 || this.#moreAfterPage;
+          return;
+        }
       }
     }
   }

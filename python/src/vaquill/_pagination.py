@@ -2,15 +2,20 @@
 
 WARNING: on charged endpoints every page spends credits. Iterating a whole result set can
 cost far more than one call. Always set ``max_pages`` or ``max_items`` unless you intend
-to read everything. When a guard stops iteration early, ``truncated`` is True.
+to read everything. When a guard stops iteration early, ``truncated`` is True (this includes
+a ``max_items`` that cut items off the last page). When the server repeats the offset or cursor
+it was just sent, or answers an empty page with ``hasMore: true``, iteration stops and
+``stuck`` is True, rather than looping and spending credits on the same page.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
+log = logging.getLogger("vaquill")
 T = TypeVar("T")
 Fetch = Callable[[dict[str, Any]], Mapping[str, Any]]
 AsyncFetch = Callable[[dict[str, Any]], Awaitable[Mapping[str, Any]]]
@@ -95,6 +100,7 @@ class _State(Generic[T]):
         self.pages = 0
         self.count = 0
         self.truncated = False
+        self.stuck = False
 
     def exhausted(self) -> bool:
         """Whether a guard forbids fetching another page. Marks ``truncated`` if more existed."""
@@ -111,12 +117,25 @@ class _State(Generic[T]):
         assert self.params is not None
         raw: Any = body.get(self.items_key) or []
         raw_items: list[Any] = list(raw) if isinstance(raw, list) else []  # pyright: ignore[reportUnknownArgumentType]
-        self.params = self.style.next_params(self.params, body, raw_items)
+        used = self.params
+        if not raw_items and body.get("hasMore") is True:
+            self.params = None
+            self._stuck("an empty page with hasMore true")
+        else:
+            self.params = self.style.next_params(used, body, raw_items)
+            if self.params is not None and self.params == used:
+                self.params = None
+                self._stuck("the offset or cursor it was just sent")
         self.pages += 1
-        if self.max_items is not None:
+        if self.max_items is not None and len(raw_items) > self.max_items - self.count:
             raw_items = raw_items[: self.max_items - self.count]
+            self.truncated = True
         self.count += len(raw_items)
         return [self.parse(i) for i in raw_items] if self.parse else raw_items
+
+    def _stuck(self, what: str) -> None:
+        self.stuck = True
+        log.warning("Pagination stopped: the server answered %s. Not fetching again.", what)
 
 
 class SyncPaginator(Generic[T]):
@@ -139,6 +158,11 @@ class SyncPaginator(Generic[T]):
     @property
     def truncated(self) -> bool:
         return self._state.truncated
+
+    @property
+    def stuck(self) -> bool:
+        """True when iteration stopped because the server repeated its paging position."""
+        return self._state.stuck
 
     def pages(self) -> Iterator[list[T]]:
         s = self._state
@@ -169,6 +193,11 @@ class AsyncPaginator(Generic[T]):
     @property
     def truncated(self) -> bool:
         return self._state.truncated
+
+    @property
+    def stuck(self) -> bool:
+        """True when iteration stopped because the server repeated its paging position."""
+        return self._state.stuck
 
     async def pages(self) -> AsyncIterator[list[T]]:
         s = self._state

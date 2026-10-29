@@ -6,6 +6,7 @@ Python SDK for the Vaquill US primary law Data API: statutes, regulations, court
 
 Server-side use only: an API key (`vq_key_...`) must never ship to a browser.
 Python 3.11 or newer. Sync and async clients with the same methods.
+The public API follows semantic versioning and may change in minor versions before 1.0.
 
 ```python
 from vaquill import Vaquill
@@ -54,7 +55,7 @@ asyncio.run(main())
 
 | Namespace | What it does |
 | --- | --- |
-| `client.statutes` | search, resolve, sections and their text, browse, changes, enactments, rulemaking, cross-references, citation extraction |
+| `client.statutes` | search, resolve, sections and their text, browse, changes, enactments, rulemaking, cross-references, citation extraction (`extract_citations` costs 0 credits with `resolve=False`) |
 | `client.session_laws` | acts as enacted: search, list, record, text, versions, changes |
 | `client.watches` | law-change alerts by webhook or email |
 | `client.boards` | the sources a watch can follow |
@@ -124,7 +125,7 @@ raw = client.with_raw_response.request(
 raw.request_id, raw.rate_limit.remaining, raw.credits_charged_this_call, raw.parse()
 ```
 
-`client.raw_request(method, path, ...)` reaches endpoints newer than this SDK and returns plain JSON.
+`client.raw_request(method, path, ...)` reaches endpoints newer than this SDK and returns an `APIResponse`; call `.parse()` for the decoded JSON (the TypeScript `rawRequest` returns the parsed value directly).
 
 ## Webhooks
 
@@ -134,7 +135,7 @@ Verify the raw request body, never re-serialised JSON.
 from vaquill import verify_webhook, WebhookVerificationError
 
 try:
-    event = verify_webhook(raw_body, request_headers, WEBHOOK_SECRET, allow_legacy=False)
+    event = verify_webhook(raw_body, request_headers, WEBHOOK_SECRET)
 except WebhookVerificationError:
     ...  # respond 400
 ```
@@ -150,7 +151,7 @@ Installing the package also installs a `vaquill` command (standard library only,
 export VAQUILL_API_KEY=vq_key_...
 vaquill resolve "42 U.S.C. 1983"                  # 2 credits
 vaquill search "medical malpractice limitations" --state ca --limit 5 --json
-vaquill section USC_42_1983 --body                # 6 credits
+vaquill section USC_T42_C21_S1983 --body                # 6 credits
 vaquill credits                                   # free
 vaquill webhook verify --secret "$SECRET" --id "$ID" --timestamp "$TS" --signature "$SIG" < body.json
 ```

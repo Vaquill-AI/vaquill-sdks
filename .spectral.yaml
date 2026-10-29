@@ -1,0 +1,41 @@
+# Spectral ruleset for the SDK contract (openapi/vaquill-us.json).
+# Errors fail CI, warnings are reported but do not. Run locally with:
+#   npx --yes @stoplight/spectral-cli@6 lint openapi/vaquill-us.json -r .spectral.yaml
+extends: ["spectral:oas"]
+
+rules:
+  # Both SDK generators derive method names from operationId.
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-operationId-valid-in-url: error
+
+  # Tags group the generated client surface and the docs navigation.
+  operation-tags: error
+  operation-tag-defined: warn
+  openapi-tags: warn
+
+  # Descriptions become docstrings in both SDKs.
+  info-description: warn
+  operation-description: warn
+  no-empty-description:
+    description: A present description must not be empty or whitespace only.
+    severity: error
+    given: "$..description"
+    then:
+      function: pattern
+      functionOptions:
+        match: "\\S"
+
+  operation-documents-client-errors:
+    description: Every operation documents at least one 4xx (or default) response so SDKs can raise typed errors.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head].responses"
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          not:
+            propertyNames:
+              not:
+                pattern: "^(4[0-9][0-9]|4XX|default)$"

@@ -27,7 +27,7 @@ def create_watch(client: Vaquill) -> str:
 def handle_delivery(raw_body: bytes, headers: Mapping[str, str]) -> WebhookEvent | None:
     """Call this from your HTTP handler with the RAW request body, never re-serialised JSON."""
     try:
-        event = verify_webhook(raw_body, headers, SECRET, allow_legacy=False)
+        event = verify_webhook(raw_body, headers, SECRET)
     except WebhookVerificationError:
         return None  # answer 400 and do not process
     print(f"verified event: {event.event}")

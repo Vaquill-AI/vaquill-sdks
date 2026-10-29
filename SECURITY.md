@@ -4,19 +4,21 @@
 
 Please report vulnerabilities privately. Do not open a public issue or pull request.
 
-1. Preferred: use GitHub private vulnerability reporting. Open the Security tab of this repository and choose "Report a vulnerability".
-2. Fallback: contact@vaquill.ai
+1. Preferred: use GitHub private vulnerability reporting at https://github.com/Vaquill-AI/vaquill-sdks/security/advisories/new (the Security tab of this repository, "Report a vulnerability").
+2. Fallback: email contact@vaquill.ai with "Security" in the subject.
 
 Include the package, its version, a description of the impact and the smallest reproduction you can.
 Never include a live API key. If a key may have leaked, rotate it in the Vaquill developer console first.
 
-We aim to acknowledge a report within 3 business days and to give a fix or mitigation plan within 14 days.
+We aim to acknowledge a report within 3 business days.
+After triage we will tell you whether we accept it and keep you updated until it is resolved.
 We publish a GitHub security advisory for every confirmed vulnerability and credit the reporter unless asked not to.
 
 ## Supported versions
 
-Only the latest released minor version of each package receives security fixes while it is on 0.x.
-After 1.0, for each package the latest minor of the current and previous major versions are supported.
+While the packages are on 0.x, only the latest released 0.x version of each package (`vaquill` on PyPI and `@vaquill-ai/sdk` on npm) receives security fixes.
+Older versions are not patched, so upgrade to the latest release.
+After 1.0 this policy will be revised and published here.
 
 ## Scope
 

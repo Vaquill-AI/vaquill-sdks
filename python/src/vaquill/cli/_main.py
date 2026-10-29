@@ -7,13 +7,11 @@ import json
 import logging
 import os
 import platform
-import re
 import shutil
 import sys
 import traceback
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from typing import Any, cast
+from collections.abc import Sequence
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -31,129 +29,91 @@ from .. import (
     __version__,
     verify_webhook,
 )
-from .._config import API_KEY_ENV, API_KEY_PREFIX, DEFAULT_MAX_RETRIES
+from .._config import API_KEY_ENV, DEFAULT_MAX_RETRIES
 from .._webhooks import WebhookPayloadError
+from . import _commands
+from ._commands import (
+    AUTH_FLAGS,
+    SEARCH_FLAGS,
+    SECTION_BODY_FLAGS,
+    all_pages,
+    json_object,
+    webhook_auth,
+)
+from ._core import (
+    AUTH,
+    CREDITS,
+    GENERIC,
+    NETWORK,
+    NOT_FOUND,
+    OK,
+    RATE_LIMITED,
+    USAGE,
+    ClientFactory,
+    CLIError,
+    Handler,
+    Result,
+    Session,
+    add_paging,
+    as_dict,
+    as_list,
+    declare,
+    dump,
+    forbid,
+    json_text,
+    kw,
+    more,
+    more_notice,
+    names,
+    paging_kw,
+    redact,
+    split_csv,
+    wants_all,
+)
 from ._render import UI, paint
 
 __all__ = ["main"]
 
-OK, GENERIC, USAGE, AUTH, CREDITS, RATE_LIMITED, NOT_FOUND, NETWORK = range(8)
 WEBHOOK_SECRET_ENV = "VAQUILL_WEBHOOK_SECRET"  # pragma: allowlist secret
-KEY_PATTERN = re.compile(r"vq_key_[A-Za-z0-9_\-]+")
-
-ClientFactory = Callable[..., Vaquill]
-
-
-class CLIError(Exception):
-    def __init__(self, message: str, code: int = GENERIC, payload: Any = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.payload = payload
-
-
-@dataclass
-class Result:
-    payload: Any
-    human: Callable[[UI], str]
-    charged: bool = False
-    notice: str | None = None
-
-
-def redact(text: str, key: str | None = None) -> str:
-    text = KEY_PATTERN.sub("vq_key_[redacted]", text)
-    return text.replace(key, "[redacted]") if key else text
-
-
-def _d(value: Any) -> dict[str, Any]:
-    return cast("dict[str, Any]", value) if isinstance(value, dict) else {}
-
-
-def _l(value: Any) -> list[Any]:
-    return cast("list[Any]", value) if isinstance(value, list) else []
-
-
-def _dump(model: Any) -> Any:
-    return model.model_dump(mode="json", by_alias=True)
-
-
-def _more(payload: Any) -> bool:
-    return any(_d(d).get("hasMore") is True for d in (payload, _d(payload).get("data")))
-
-
-def _more_notice(what: str, hint: str) -> str:
-    return f"notice: more {what} exist; this command fetched one page. {hint}"
-
-
-class Session:
-    """Holds the parsed options and builds the client on first use."""
-
-    def __init__(self, args: argparse.Namespace, factory: ClientFactory) -> None:
-        self.args = args
-        self._factory = factory
-        self._client: Vaquill | None = None
-
-    @property
-    def key(self) -> str | None:
-        return self.args.api_key or os.environ.get(API_KEY_ENV) or None
-
-    @property
-    def client(self) -> Vaquill:
-        if self._client is None:
-            key = self.key
-            if not key:
-                raise CLIError(f"No API key. Set {API_KEY_ENV} or pass --api-key.", AUTH)
-            if not key.startswith(API_KEY_PREFIX):
-                raise CLIError(
-                    f"Invalid API key: Vaquill keys start with '{API_KEY_PREFIX}'.", AUTH
-                )
-            self._client = self._factory(
-                api_key=key,
-                base_url=self.args.base_url,
-                timeout=self.args.timeout,
-                max_retries=self.args.max_retries,
-                max_credits=self.args.max_credits,
-            )
-        return self._client
-
-    def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-
-
-Handler = Callable[[Session], Result]
+_ = (GENERIC, USAGE, AUTH, CREDITS, RATE_LIMITED, NOT_FOUND, NETWORK, OK)
 
 
 # ---- commands --------------------------------------------------------------------------
 
 
+def _search_human(ui: UI, data: dict[str, Any]) -> str:
+    hits = as_list(data.get("results"))
+    total = data.get("totalMatches") or data.get("total")
+    head = ui.bold(f"{len(hits)} results" + (f" of {total}" if total else ""))
+    if not hits:
+        return head
+    rows = [(h.get("citation"), h.get("actId"), h.get("sectionTitle")) for h in map(as_dict, hits)]
+    return head + "\n" + ui.table(["citation", "act id", "title"], rows)
+
+
 def _search(s: Session) -> Result:
     a = s.args
-    r = s.client.statutes.search(
-        a.query, state=a.state, corpus_type=a.corpus_type, limit=a.limit, offset=a.offset
-    )
-    data = _dump(r)
-
-    def human(ui: UI) -> str:
-        hits = _l(data.get("results"))
-        total = data.get("totalMatches") or data.get("total")
-        head = ui.bold(f"{len(hits)} results" + (f" of {total}" if total else ""))
-        if not hits:
-            return head
-        rows = [(h.get("citation"), h.get("actId"), h.get("sectionTitle")) for h in map(_d, hits)]
-        return head + "\n" + ui.table(["citation", "act id", "title"], rows)
-
+    filters = kw(a, names(SEARCH_FLAGS))
+    if "fields" in filters:
+        filters["fields"] = split_csv(filters["fields"])
+    if wants_all(a):
+        forbid(a, "offset")
+        filters.pop("offset", None)
+        pager = s.client.statutes.iter_search(a.query, **paging_kw(a), **filters)
+        return all_pages(pager, "results", charged=True, human=_search_human)
+    data = dump(s.client.statutes.search(a.query, **filters))
     notice = None
     if data.get("hasMore"):
         nxt = data.get("nextOffset")
-        notice = _more_notice("results", f"Continue with --offset {nxt}." if nxt else "")
-    return Result(data, human, charged=True, notice=notice)
+        notice = more_notice("results", f"Continue with --offset {nxt}." if nxt else "")
+    return Result(data, lambda ui: _search_human(ui, data), charged=True, notice=notice)
 
 
 def _resolve(s: Session) -> Result:
-    data = _dump(s.client.statutes.resolve(s.args.citation))
+    data = dump(s.client.statutes.resolve(s.args.citation, **kw(s.args, ("state", "corpus_type"))))
 
     def human(ui: UI) -> str:
-        sec = _d(data.get("section"))
+        sec = as_dict(data.get("section"))
         if not data.get("resolved") or not sec:
             return ui.kv([("resolved", False), ("reason", data.get("missReason"))])
         return ui.kv(
@@ -170,8 +130,12 @@ def _resolve(s: Session) -> Result:
 
 def _section(s: Session) -> Result:
     a = s.args
+    options = kw(a, names(SECTION_BODY_FLAGS))
+    if options and not a.body:
+        flags = ", ".join("--" + k.replace("_", "-") for k in options)
+        raise CLIError(f"{flags} only applies with --body (the text costs more).", USAGE)
     if a.body:
-        data = _dump(s.client.statutes.get_section_body(a.act_id))
+        data = dump(s.client.statutes.get_section_body(a.act_id, **options))
 
         def human(ui: UI) -> str:
             text = data.get("plain") or data.get("markdown") or data.get("content")
@@ -180,10 +144,10 @@ def _section(s: Session) -> Result:
             return str(text)
 
         return Result(data, human, charged=True)
-    data = _dump(s.client.statutes.get_section(a.act_id))
+    data = dump(s.client.statutes.get_section(a.act_id))
 
     def meta(ui: UI) -> str:
-        sec = _d(data.get("section"))
+        sec = as_dict(data.get("section"))
         keys = (
             "citation",
             "actId",
@@ -199,10 +163,10 @@ def _section(s: Session) -> Result:
 
 
 def _coverage(s: Session) -> Result:
-    data = _dump(s.client.statutes.coverage())
+    data = dump(s.client.statutes.coverage(**kw(s.args, ("state",))))
 
     def human(ui: UI) -> str:
-        body = _d(data.get("data"))
+        body = as_dict(data.get("data"))
         head = ui.kv(
             [
                 ("sections", body.get("totalSections")),
@@ -212,7 +176,7 @@ def _coverage(s: Session) -> Result:
         )
         rows = [
             (j.get("code"), j.get("sectionCount"), j.get("name"))
-            for j in map(_d, _l(body.get("jurisdictions")))
+            for j in map(as_dict, as_list(body.get("jurisdictions")))
             if j.get("hasData")
         ]
         return head + "\n\n" + ui.table(["code", "sections", "name"], rows) if rows else head
@@ -221,7 +185,7 @@ def _coverage(s: Session) -> Result:
 
 
 def _credits(s: Session) -> Result:
-    data = _dump(s.client.credits.balance())
+    data = dump(s.client.credits.balance())
 
     def human(ui: UI) -> str:
         keys = ("creditsRemaining", "usdRemaining", "plan", "totalConsumed", "nextExpiry")
@@ -231,12 +195,12 @@ def _credits(s: Session) -> Result:
 
 
 def _pricing(s: Session) -> Result:
-    data = _dump(s.client.pricing.get())
+    data = dump(s.client.pricing.get())
 
     def human(ui: UI) -> str:
         rows = [
             (c.get("credits"), c.get("operation") or c.get("endpoint"), c.get("description"))
-            for c in map(_d, _l(data.get("costs")))
+            for c in map(as_dict, as_list(data.get("costs")))
         ]
         unit = f"1 credit = ${data.get('dollarPerCredit')}"
         return ui.dim(unit) + "\n" + ui.table(["credits", "operation", "description"], rows)
@@ -244,41 +208,56 @@ def _pricing(s: Session) -> Result:
     return Result(data, human)
 
 
+def _watch_rows_human(ui: UI, rows: list[Any]) -> str:
+    table = [
+        (w.get("id"), w.get("corpusType"), w.get("state"), w.get("channel"), w.get("isActive"))
+        for w in map(as_dict, rows)
+    ]
+    return (
+        ui.table(["id", "corpus", "state", "channel", "active"], table) if table else "no watches"
+    )
+
+
 def _watches_list(s: Session) -> Result:
     a = s.args
-    data = _dump(s.client.watches.list(limit=a.limit, offset=a.offset))
-
-    def human(ui: UI) -> str:
-        rows = [
-            (w.get("id"), w.get("corpusType"), w.get("state"), w.get("channel"), w.get("isActive"))
-            for w in map(_d, _l(_d(data.get("data")).get("watches")))
-        ]
-        return (
-            ui.table(["id", "corpus", "state", "channel", "active"], rows) if rows else "no watches"
+    if wants_all(a):
+        forbid(a, "offset")
+        pager = s.client.watches.iter_list(**kw(a, ("limit",)), **paging_kw(a))
+        return all_pages(
+            pager,
+            "watches",
+            charged=False,
+            human=lambda ui, d: _watch_rows_human(ui, as_list(d.get("watches"))),
         )
-
+    data = dump(s.client.watches.list(limit=a.limit, offset=a.offset))
     notice = None
-    if _more(data):
-        count = len(_l(_d(data.get("data")).get("watches")))
-        notice = _more_notice("watches", f"Continue with --offset {(a.offset or 0) + count}.")
-    return Result(data, human, notice=notice)
+    if more(data):
+        count = len(as_list(as_dict(data.get("data")).get("watches")))
+        notice = more_notice("watches", f"Continue with --offset {(a.offset or 0) + count}.")
+    return Result(
+        data,
+        lambda ui: _watch_rows_human(ui, as_list(as_dict(data.get("data")).get("watches"))),
+        notice=notice,
+    )
 
 
 def _watches_create(s: Session) -> Result:
     a = s.args
-    data = _dump(
+    data = dump(
         s.client.watches.create(
             a.corpus_type,
             state=a.state,
             channel=a.channel,
             webhook_url=a.webhook_url,
             webhook_secret=a.webhook_secret,
+            webhook_auth=webhook_auth(a),
             email_address=a.email,
+            scope=json_object(a.scope, "--scope"),
         )
     )
 
     def human(ui: UI) -> str:
-        w = _d(data.get("data"))
+        w = as_dict(data.get("data"))
         keys = ("id", "corpusType", "state", "channel", "webhookUrl", "emailAddress", "isActive")
         return ui.kv([(k, w.get(k)) for k in keys])
 
@@ -290,43 +269,54 @@ def _watches_delete(s: Session) -> Result:
     return Result({"deleted": True, "id": s.args.watch_id}, lambda ui: f"deleted {s.args.watch_id}")
 
 
+def _watch_changes_human(ui: UI, changes: list[Any]) -> str:
+    rows = [
+        (c.get("id"), c.get("detectedAt"), c.get("changeKind"), c.get("citation") or c.get("actId"))
+        for c in map(as_dict, changes)
+    ]
+    return ui.table(["id", "detected", "kind", "citation"], rows) if rows else "no changes"
+
+
 def _watches_changes(s: Session) -> Result:
     a = s.args
-    data = _dump(
+    if wants_all(a):
+        forbid(a, "since_id", "before_id")
+        pager = s.client.watches.iter_changes(
+            a.watch_id, **kw(a, ("limit", "since", "change_kind", "order")), **paging_kw(a)
+        )
+        return all_pages(
+            pager,
+            "changes",
+            charged=False,
+            human=lambda ui, d: _watch_changes_human(ui, as_list(d.get("changes"))),
+        )
+    data = dump(
         s.client.watches.changes(
-            a.watch_id, limit=a.limit, since_id=a.since_id, before_id=a.before_id, order=a.order
+            a.watch_id,
+            limit=a.limit,
+            since_id=a.since_id,
+            before_id=a.before_id,
+            order=a.order,
+            **kw(a, ("since", "change_kind")),
         )
     )
-    changes = _l(_d(data.get("data")).get("changes"))
-
-    def human(ui: UI) -> str:
-        rows = [
-            (
-                c.get("id"),
-                c.get("detectedAt"),
-                c.get("changeKind"),
-                c.get("citation") or c.get("actId"),
-            )
-            for c in map(_d, changes)
-        ]
-        return ui.table(["id", "detected", "kind", "citation"], rows) if rows else "no changes"
-
+    changes = as_list(as_dict(data.get("data")).get("changes"))
     notice = None
-    if _more(data) and changes:
-        last = _d(changes[-1]).get("id")
+    if more(data) and changes:
+        last = as_dict(changes[-1]).get("id")
         flag = "--since-id" if a.order == "asc" else "--before-id"
-        notice = _more_notice("changes", f"Continue with {flag} {last}.")
-    return Result(data, human, notice=notice)
+        notice = more_notice("changes", f"Continue with {flag} {last}.")
+    return Result(data, lambda ui: _watch_changes_human(ui, changes), notice=notice)
 
 
 def _watches_deliveries(s: Session) -> Result:
-    data = _dump(s.client.watches.deliveries(s.args.watch_id, limit=s.args.limit))
+    data = dump(s.client.watches.deliveries(s.args.watch_id, limit=s.args.limit))
 
     def human(ui: UI) -> str:
-        body = _d(data.get("data"))
+        body = as_dict(data.get("data"))
         rows = [
             (d.get("attemptedAt"), d.get("success"), d.get("statusCode"), d.get("error"))
-            for d in map(_d, _l(body.get("deliveries")))
+            for d in map(as_dict, as_list(body.get("deliveries")))
         ]
         head = ui.kv([("health", body.get("deliveryHealth"))])
         return (head + "\n\n" if head else "") + (
@@ -403,22 +393,69 @@ def _api(s: Session) -> Result:
     )
     data = response.json()
     notice = None
-    if _more(data):
-        d = _d(data) if "hasMore" in _d(data) else _d(_d(data).get("data"))
+    if more(data):
+        d = as_dict(data) if "hasMore" in as_dict(data) else as_dict(as_dict(data).get("data"))
         nxt = d.get("nextCursor") or d.get("nextOffset")
         hint = f"The next page starts at {nxt}." if nxt else ""
-        notice = _more_notice("pages", f"Pass the next page parameter with --query. {hint}".strip())
-    return Result(data, lambda ui: _json_text(data), charged=a.charged, notice=notice)
+        notice = more_notice("pages", f"Pass the next page parameter with --query. {hint}".strip())
+    return Result(data, lambda ui: json_text(data), charged=a.charged, notice=notice)
 
 
 # ---- parser ----------------------------------------------------------------------------
 
 
-def _json_text(payload: Any) -> str:
-    return json.dumps(payload, indent=2, ensure_ascii=False)
+GLOBAL_DEFAULTS: dict[str, Any] = {
+    "api_key": None,
+    "base_url": None,
+    "timeout": None,
+    "max_retries": DEFAULT_MAX_RETRIES,
+    "max_credits": None,
+    "json": False,
+    "no_color": False,
+    "debug": False,
+}
+
+
+def _declare_search(p: argparse.ArgumentParser) -> None:
+    p.add_argument("query")
+    declare(p, SEARCH_FLAGS)
+    add_paging(p, "results (each page is charged)")
+
+
+def _declare_resolve(p: argparse.ArgumentParser) -> None:
+    p.add_argument("citation")
+    p.add_argument("--state", help="Jurisdiction hint for a bare citation.")
+    p.add_argument("--corpus-type", help="Corpus hint such as STATE or REGULATION.")
+
+
+def _declare_section(p: argparse.ArgumentParser) -> None:
+    p.add_argument("act_id", metavar="ACT_ID")
+    p.add_argument("--body", action="store_true", help="Fetch the text instead (costs more).")
+    declare(p, SECTION_BODY_FLAGS)
+
+
+def _declare_coverage(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--state", help="Only this jurisdiction.")
+
+
+# Commands that exist at the top level and again inside the ``statutes`` group.
+CORE_STATUTE_COMMANDS: tuple[tuple[str, Handler, str, Any], ...] = (
+    ("search", _search, "Search statutes, regulations and rules (charged).", _declare_search),
+    ("resolve", _resolve, "Resolve a citation to its section (charged).", _declare_resolve),
+    ("section", _section, "Show a section's metadata or text (charged).", _declare_section),
+    (
+        "coverage",
+        _coverage,
+        "Show what the corpus holds per jurisdiction (free).",
+        _declare_coverage,
+    ),
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    # Global options default to SUPPRESS: a default set on the top parser would be copied over
+    # whatever the subparser parsed (and the reverse), so an unset flag must leave no trace.
+    # _parse() fills GLOBAL_DEFAULTS in afterwards.
     S = argparse.SUPPRESS
     common = argparse.ArgumentParser(add_help=False)
     g = common.add_argument_group("global options")
@@ -438,16 +475,6 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog="Exit codes: 0 ok, 1 error, 2 usage, 3 auth, 4 no credits, 5 rate limited, "
         "6 not found, 7 network.",
     )
-    parser.set_defaults(
-        api_key=None,
-        base_url=None,
-        timeout=None,
-        max_retries=DEFAULT_MAX_RETRIES,
-        max_credits=None,
-        json=False,
-        no_color=False,
-        debug=False,
-    )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
     def add(
@@ -459,33 +486,27 @@ def _build_parser() -> argparse.ArgumentParser:
         p.set_defaults(run=run)
         return p
 
-    p = add(sub, "search", _search, "Search statutes, regulations and rules (charged).")
-    p.add_argument("query")
-    p.add_argument("--corpus-type", action="append", metavar="TYPE", help="Repeatable filter.")
-    p.add_argument("--state", help="Jurisdiction code such as ca or federal.")
-    p.add_argument("--limit", type=int, help="Results per page.")
-    p.add_argument("--offset", type=int, help="Results to skip.")
+    def group(name: str, text: str) -> argparse.ArgumentParser:
+        return sub.add_parser(name, parents=[common], help=text, description=text)
 
-    p = add(sub, "resolve", _resolve, "Resolve a citation to its section (charged).")
-    p.add_argument("citation")
+    for name, run, text, declare_flags in CORE_STATUTE_COMMANDS:
+        declare_flags(add(sub, name, run, text))
 
-    p = add(sub, "section", _section, "Show a section's metadata or text (charged).")
-    p.add_argument("act_id", metavar="ACT_ID")
-    p.add_argument("--body", action="store_true", help="Fetch the text instead (costs more).")
-
-    add(sub, "coverage", _coverage, "Show what the corpus holds per jurisdiction (free).")
     add(sub, "credits", _credits, "Show your credit balance (free).")
     add(sub, "pricing", _pricing, "Show the credit price of every endpoint (free).")
 
-    w = sub.add_parser(
-        "watches",
-        help="Manage law-change watches (free).",
-        description="Manage law-change watches (free).",
-    )
+    statutes = _commands.register_statutes(group, add)
+    for name, run, text, declare_flags in CORE_STATUTE_COMMANDS:
+        declare_flags(add(statutes, name, run, text))
+    _commands.register_session_laws(group, add)
+    _commands.register_boards(sub, add)
+
+    w = group("watches", "Manage law-change watches (free).")
     ws = w.add_subparsers(dest="action", required=True, metavar="ACTION")
     p = add(ws, "list", _watches_list, "List your watches.")
     p.add_argument("--limit", type=int)
     p.add_argument("--offset", type=int)
+    add_paging(p, "watches")
     p = add(ws, "create", _watches_create, "Create a watch on a corpus.")
     p.add_argument("corpus_type", metavar="CORPUS_TYPE")
     p.add_argument("--state")
@@ -493,6 +514,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--webhook-url")
     p.add_argument("--webhook-secret")
     p.add_argument("--email")
+    declare(p, AUTH_FLAGS)
+    p.add_argument("--scope", metavar="JSON", help="Narrow the watch with a JSON object.")
     p = add(ws, "delete", _watches_delete, "Delete a watch.")
     p.add_argument("watch_id", metavar="WATCH_ID")
     p = add(ws, "changes", _watches_changes, "List the changes a watch recorded.")
@@ -500,14 +523,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int)
     p.add_argument("--since-id", type=int)
     p.add_argument("--before-id", type=int)
+    p.add_argument("--since", help="Only changes detected after this ISO timestamp.")
+    p.add_argument("--change-kind", action="append", metavar="KIND", help="Repeatable filter.")
     p.add_argument("--order", choices=["asc", "desc"])
+    add_paging(p, "changes")
     p = add(ws, "deliveries", _watches_deliveries, "List recent deliveries for a watch.")
     p.add_argument("watch_id", metavar="WATCH_ID")
     p.add_argument("--limit", type=int)
+    _commands.register_watches(ws, add)
 
-    h = sub.add_parser(
-        "webhook", help="Webhook tools (offline).", description="Webhook tools (offline)."
-    )
+    h = group("webhook", "Webhook tools (offline).")
     hs = h.add_subparsers(dest="action", required=True, metavar="ACTION")
     p = add(
         hs,
@@ -538,6 +563,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, help="Sets the limit query parameter.")
     p.add_argument("--charged", action="store_true", help="Treat the call as charged.")
     return parser
+
+
+def _parse(parser: argparse.ArgumentParser, argv: Sequence[str] | None) -> argparse.Namespace:
+    """Parse ``argv``; a global flag counts wherever it appears, the last one given wins."""
+    args = parser.parse_args(argv)
+    for name, default in GLOBAL_DEFAULTS.items():
+        if not hasattr(args, name):
+            setattr(args, name, default)
+    return args
 
 
 # ---- entry point -----------------------------------------------------------------------
@@ -588,7 +622,7 @@ def main(argv: Sequence[str] | None = None, *, _client_factory: ClientFactory | 
     """Run the CLI and return the exit code. ``_client_factory`` is a test seam."""
     parser = _build_parser()
     try:
-        args = parser.parse_args(argv)
+        args = _parse(parser, argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else GENERIC
 
@@ -600,29 +634,38 @@ def main(argv: Sequence[str] | None = None, *, _client_factory: ClientFactory | 
     def fail(message: str) -> None:
         print(paint("error: ", "red", err_color) + redact(message, session.key), file=sys.stderr)
 
+    logger = logging.getLogger("vaquill")
+    handler: logging.Handler | None = None
+    previous_level = logger.level
     if args.debug:
         handler = logging.StreamHandler(sys.stderr)
         handler.addFilter(_RedactingFilter(session.key))
-        logging.getLogger("vaquill").addHandler(handler)
-        logging.getLogger("vaquill").setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
     try:
-        result = args.run(session)
-    except CLIError as exc:
-        if args.json and exc.payload is not None:
-            print(_json_text(exc.payload))
-        fail(str(exc))
-        return exc.code
-    except Exception as exc:
-        fail(_describe(exc))
-        if args.debug:
-            print(redact(traceback.format_exc(), session.key), file=sys.stderr)
-        return _exit_code(exc)
-    finally:
-        session.close()
+        try:
+            result = args.run(session)
+        except CLIError as exc:
+            if args.json and exc.payload is not None:
+                print(json_text(exc.payload))
+            fail(str(exc))
+            return exc.code
+        except Exception as exc:
+            fail(_describe(exc))
+            if args.debug:
+                print(redact(traceback.format_exc(), session.key), file=sys.stderr)
+            return _exit_code(exc)
+        finally:
+            session.close()
 
-    print(_json_text(result.payload) if args.json else result.human(ui))
-    if result.notice:
-        print(paint(result.notice, "yellow", err_color), file=sys.stderr)
-    if result.charged:
-        print(f"credits used: {session.client.credits_spent:g}", file=sys.stderr)
-    return OK
+        print(json_text(result.payload) if args.json else result.human(ui))
+        if result.notice:
+            print(paint(result.notice, "yellow", err_color), file=sys.stderr)
+        if result.charged:
+            print(f"credits used: {session.client.credits_spent:g}", file=sys.stderr)
+        return OK
+    finally:
+        if handler is not None:
+            logger.removeHandler(handler)
+            logger.setLevel(previous_level)
+            handler.close()

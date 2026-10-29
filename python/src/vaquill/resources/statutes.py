@@ -22,6 +22,7 @@ from ..types import (
     StatuteCrossStateResponse,
     StatuteDefinitionsResponse,
     StatuteNeighborsResponse,
+    StatuteResolveBatchItem,
     StatuteResolveBatchResponse,
     StatuteResolveResponse,
     StatuteResult,
@@ -32,11 +33,28 @@ from ..types import (
     UsStatutesCoverageEnvelope,
     UsStatutesDivisionsResponse,
 )
-from ._base import HasMoreId, NextOffsetOrHasMore, RequestOptions, SyncResource, compact, seg, wire
+from ._base import (
+    HasMoreId,
+    NextOffsetOrHasMore,
+    RequestOptions,
+    SyncResource,
+    chunk_options,
+    chunked,
+    compact,
+    seg,
+    unique,
+    wire,
+)
 
 __all__ = ["SyncStatutes"]
 
 Strs = str | Sequence[str]
+
+
+RESOLVE_BATCH_MAX = 500
+"""Citations per ``POST /us/statutes/resolve`` call (``maxItems`` in the spec)."""
+SECTIONS_BATCH_MAX = 50
+"""Ids per ``POST /us/statutes/sections`` call (``maxItems`` in the spec)."""
 
 
 class SearchFilters(TypedDict, total=False):
@@ -261,6 +279,41 @@ class SyncStatutes(SyncResource):
             **options,
         )
 
+    def resolve_batch_all(
+        self,
+        citations: Sequence[str],
+        *,
+        state: str | None = None,
+        corpus_type: str | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> list[StatuteResolveBatchItem]:
+        """Resolve any number of citations by chunking :meth:`resolve_batch`. Charged.
+
+        Sends at most ``RESOLVE_BATCH_MAX`` (500, the spec's per-call cap) citations per call and
+        returns the ``results`` of every call as one flat list, in order. Exact repeats are sent
+        once. The ``max_credits`` spend guard is checked before each chunk, so a guard that is
+        reached part way raises ``SpendGuardExceeded`` and the later chunks are not sent.
+        A caller's ``idempotency_key`` is suffixed with the chunk number after the first chunk.
+
+        Args:
+            citations: The citations.
+            state: Jurisdiction hint for bare citations.
+            corpus_type: Corpus hint.
+        """
+        results: list[StatuteResolveBatchItem] = []
+        for i, chunk in enumerate(chunked(unique(citations), RESOLVE_BATCH_MAX)):
+            body = {"citations": chunk, "state": state, "corpusType": corpus_type}
+            response = self._client.request(
+                "POST",
+                "/api/v1/us/statutes/resolve",
+                cast_to=StatuteResolveBatchResponse,
+                json=compact(body),
+                charged=True,
+                **chunk_options(options, i),
+            )
+            results.extend(response.results or [])
+        return results
+
     def get_section(self, act_id: str, **options: Unpack[RequestOptions]) -> StatuteSectionResponse:
         """A section's metadata (no text). Charged, 2 credits.
 
@@ -344,6 +397,40 @@ class SyncStatutes(SyncResource):
             charged=True,
             **options,
         )
+
+    def get_sections_all(
+        self,
+        act_ids: Sequence[str],
+        *,
+        include_body: bool | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> list[StatuteResult]:
+        """Fetch any number of sections by chunking :meth:`get_sections_batch`. Charged.
+
+        Sends at most ``SECTIONS_BATCH_MAX`` (50, the spec's per-call cap) ids per call and returns
+        the ``sections`` of every call as one flat list, in order. Exact repeats are sent once.
+        The ``max_credits`` spend guard is checked before each chunk, so a guard that is reached
+        part way raises ``SpendGuardExceeded`` and the later chunks are not sent. Ids with no
+        match are dropped (use :meth:`get_sections_batch` to see ``notFound``).
+        A caller's ``idempotency_key`` is suffixed with the chunk number after the first chunk.
+
+        Args:
+            act_ids: Section ids.
+            include_body: Also return each section's text (the body price applies).
+        """
+        sections: list[StatuteResult] = []
+        for i, chunk in enumerate(chunked(unique(act_ids), SECTIONS_BATCH_MAX)):
+            body = {"actIds": chunk, "includeBody": include_body}
+            response = self._client.request(
+                "POST",
+                "/api/v1/us/statutes/sections",
+                cast_to=StatuteSectionsResponse,
+                json=compact(body),
+                charged=True,
+                **chunk_options(options, i),
+            )
+            sections.extend(response.sections or [])
+        return sections
 
     def count(
         self,
@@ -668,6 +755,8 @@ class SyncStatutes(SyncResource):
         **options: Unpack[RequestOptions],
     ) -> ExtractCitationsResponse:
         """Find the citations in a document and resolve them. Charged, 2 credits per distinct one.
+
+        With ``resolve=False`` it only extracts the citations and costs 0 credits.
 
         Args:
             text: The document text.

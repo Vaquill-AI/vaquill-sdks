@@ -364,9 +364,9 @@
                 "type": "null"
               }
             ],
-            "description": "URL naming the error kind, `https://docs.vaquill.ai/errors/{code}`.",
+            "description": "URL naming the error kind, `https://www.vaquill.ai/docs/errors/{code}`.",
             "examples": [
-              "https://docs.vaquill.ai/errors/insufficient_credits"
+              "https://www.vaquill.ai/docs/errors/insufficient_credits"
             ],
             "title": "Type"
           }
@@ -706,6 +706,255 @@
           "cadence"
         ],
         "title": "BoardResponse",
+        "type": "object"
+      },
+      "BoardTestWebhookPayload": {
+        "description": "Body of a `board.test` delivery, sent by `POST /watches/{watchId}/test`.",
+        "properties": {
+          "boardLabel": {
+            "title": "Boardlabel",
+            "type": "string"
+          },
+          "corpusType": {
+            "title": "Corpustype",
+            "type": "string"
+          },
+          "event": {
+            "const": "board.test",
+            "title": "Event",
+            "type": "string"
+          },
+          "firedAt": {
+            "description": "ISO 8601 time the delivery was built.",
+            "title": "Firedat",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "test": {
+            "const": true,
+            "description": "Always true: marks the delivery as a manual test.",
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event",
+          "firedAt",
+          "corpusType",
+          "boardLabel",
+          "test"
+        ],
+        "title": "BoardTestWebhookPayload",
+        "type": "object"
+      },
+      "BoardUpdatedWebhookPayload": {
+        "description": "Body of a `board.updated` delivery: a watched board refreshed with real changes.",
+        "properties": {
+          "boardLabel": {
+            "title": "Boardlabel",
+            "type": "string"
+          },
+          "changes": {
+            "description": "Up to 10 changed sections. See `changesOverflowCount` for the rest.",
+            "items": {
+              "$ref": "#/components/schemas/BoardWebhookChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "changesOverflowCount": {
+            "description": "Changed sections beyond the ones in `changes`; page `GET /watches/{watchId}/changes` for them.",
+            "title": "Changesoverflowcount",
+            "type": "integer"
+          },
+          "corpusType": {
+            "title": "Corpustype",
+            "type": "string"
+          },
+          "event": {
+            "const": "board.updated",
+            "title": "Event",
+            "type": "string"
+          },
+          "firedAt": {
+            "description": "ISO 8601 time the delivery was built.",
+            "title": "Firedat",
+            "type": "string"
+          },
+          "refreshLogId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refreshlogid"
+          },
+          "rowsAdded": {
+            "description": "Stored rows (chunks), not sections.",
+            "title": "Rowsadded",
+            "type": "integer"
+          },
+          "rowsDeleted": {
+            "description": "Stored rows (chunks), not sections.",
+            "title": "Rowsdeleted",
+            "type": "integer"
+          },
+          "rowsUpdated": {
+            "description": "Stored rows (chunks), not sections.",
+            "title": "Rowsupdated",
+            "type": "integer"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The watch's scope, echoed so section counts can be read against it.",
+            "title": "Scope"
+          },
+          "sectionsAdded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sections added. Absent when not counted.",
+            "title": "Sectionsadded"
+          },
+          "sectionsAmended": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectionsamended"
+          },
+          "sectionsRemoved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectionsremoved"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for a federal board.",
+            "title": "State"
+          }
+        },
+        "required": [
+          "event",
+          "firedAt",
+          "corpusType",
+          "boardLabel",
+          "rowsAdded",
+          "rowsUpdated",
+          "rowsDeleted",
+          "changes",
+          "changesOverflowCount"
+        ],
+        "title": "BoardUpdatedWebhookPayload",
+        "type": "object"
+      },
+      "BoardWebhookChange": {
+        "description": "One `changes[]` item: a strict subset of a `GET /watches/{watchId}/changes` row.",
+        "properties": {
+          "actId": {
+            "title": "Actid",
+            "type": "string"
+          },
+          "changeKind": {
+            "enum": [
+              "added",
+              "amended",
+              "removed"
+            ],
+            "title": "Changekind",
+            "type": "string"
+          },
+          "citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation"
+          },
+          "detectedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When our refresh observed the change, not the date the law changed.",
+            "title": "Detectedat"
+          },
+          "id": {
+            "description": "Change id. Pass it as `sinceId` or to the change diff route.",
+            "title": "Id",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "changeKind",
+          "actId"
+        ],
+        "title": "BoardWebhookChange",
         "type": "object"
       },
       "BoardsEnvelope": {
@@ -4468,6 +4717,17 @@
           "processingTimeMs": {
             "title": "Processingtimems",
             "type": "number"
+          },
+          "resolvedFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectionIdentifierResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when the identifier sent was not the act_id served."
           },
           "unresolvedCitations": {
             "items": {
@@ -15446,7 +15706,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present only with `matchType: \"boolean\"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset.",
+            "description": "Present only with `matchType: \"boolean\"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset. For every other `matchType` (`any`, `all`, `phrase`) the field is absent: while `hasMore` is true, request the next page with `offset` + `limit`.",
             "examples": [
               170
             ],
@@ -16891,12 +17151,6 @@
         "in": "header",
         "name": "X-API-Key",
         "type": "apiKey"
-      },
-      "ApiKeyQuery": {
-        "description": "The same API key as a query parameter: `?api_key=vq_key_...`. Use only where you cannot set a header. A URL can end up in proxy and server logs, browser history and shared links, so prefer either header form, and rotate a key that has leaked.",
-        "in": "query",
-        "name": "api_key",
-        "type": "apiKey"
       }
     }
   },
@@ -16910,7 +17164,7 @@
       "name": "Vaquill API Support",
       "url": "https://www.vaquill.ai"
     },
-    "description": "Public API for legal statutes and legislation.\n\n**Authentication**: Pass your API key as `Authorization: Bearer vq_key_...` (preferred) or in the `X-API-Key` header. The `api_key` query parameter also works where a header cannot be set, but a URL ends up in logs and browser history. Sending two different keys in one request is rejected with a 401.\n\n**Credits**: Each call costs API credits. See `GET /api/v1/api-credits/pricing` for the full pricing matrix.\n\n## Jurisdictions\n\n| Jurisdiction | Coverage | `countryCode` |\n|---|---|---|\n| **United States** | USC and the Statutes at Large, the CFR and its annual editions, all 56 state and territory statutory codes (50 states, DC and five territories), state administrative regulations, court rules, federal and state constitutions, federal agency guidance and adjudications, the Federal Register, the Sentencing Guidelines and US tax treaties. | `US` |\n\nSee the full [Coverage page](https://www.vaquill.ai/docs/api-guide/coverage) for the jurisdiction-by-jurisdiction breakdown, or call `/us/statutes/coverage` for live counts. Coverage is per (jurisdiction, corpusType) pair, so treat that endpoint as the authoritative list rather than this summary.\n\n## Endpoints\n\n- **US Statutes**: Search and retrieve any of the corpora above with full text, resolve a citation to its exact section, browse the statutory hierarchy, read a section as it stood on a past date, and follow its change history, cross-references and defined terms\n- **Board Watches**: Subscribe to a corpus source and get a webhook or email when it refreshes with real changes (free, API key required)\n- **Pricing**: Credit costs per endpoint (no auth required)\n\n## Rate limits\n\nLimits are enforced per API key and scale with your plan. A `429` response includes a `Retry-After` header.\n\n| Plan | Per minute | Per hour | Per day |\n|---|---|---|---|\n| Vaquill API Pro | 60 | 1,000 | 2,000 |\n| Vaquill API Business | 150 | 2,500 | 10,000 |\n\nFor full documentation, visit the [API Reference](https://www.vaquill.ai/docs/api-reference/).",
+    "description": "Public API for legal statutes and legislation.\n\n**Authentication**: Pass your API key as `Authorization: Bearer vq_key_...` (preferred) or in the `X-API-Key` header. Sending two different keys in one request is rejected with a 401.\n\n**Credits**: Each call costs API credits. See `GET /api/v1/api-credits/pricing` for the full pricing matrix.\n\n## Jurisdictions\n\n| Jurisdiction | Coverage | `countryCode` |\n|---|---|---|\n| **United States** | USC and the Statutes at Large, the CFR and its annual editions, all 56 state and territory statutory codes (50 states, DC and five territories), state administrative regulations, court rules, federal and state constitutions, federal agency guidance and adjudications, the Federal Register, the Sentencing Guidelines and US tax treaties. | `US` |\n\nSee the full [Coverage page](https://www.vaquill.ai/docs/api-guide/coverage) for the jurisdiction-by-jurisdiction breakdown, or call `/us/statutes/coverage` for live counts. Coverage is per (jurisdiction, corpusType) pair, so treat that endpoint as the authoritative list rather than this summary.\n\n## Endpoints\n\n- **US Statutes**: Search and retrieve any of the corpora above with full text, resolve a citation to its exact section, browse the statutory hierarchy, read a section as it stood on a past date, and follow its change history, cross-references and defined terms\n- **Board Watches**: Subscribe to a corpus source and get a webhook or email when it refreshes with real changes (free, API key required)\n- **Pricing**: Credit costs per endpoint (no auth required)\n\n## Rate limits\n\nLimits are enforced per API key and scale with your plan. A `429` response includes a `Retry-After` header.\n\n| Plan | Per minute | Per hour | Per day |\n|---|---|---|---|\n| Vaquill API Pro | 60 | 1,000 | 2,000 |\n| Vaquill API Business | 150 | 2,500 | 10,000 |\n\nFor full documentation, visit the [API Reference](https://www.vaquill.ai/docs/api-reference/).",
     "license": {
       "name": "Proprietary",
       "url": "https://www.vaquill.ai/terms"
@@ -26397,6 +26651,36 @@
               }
             }
           },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiDetailError"
+                }
+              }
+            },
+            "description": "Insufficient credits.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/X-RateLimit-Limit"
+              },
+              "X-RateLimit-Limit-Day": {
+                "$ref": "#/components/headers/X-RateLimit-Limit-Day"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/X-RateLimit-Remaining"
+              },
+              "X-RateLimit-Remaining-Day": {
+                "$ref": "#/components/headers/X-RateLimit-Remaining-Day"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/X-RateLimit-Reset"
+              },
+              "X-Request-ID": {
+                "$ref": "#/components/headers/X-Request-ID"
+              }
+            }
+          },
           "404": {
             "content": {
               "application/json": {
@@ -26785,6 +27069,36 @@
               }
             },
             "description": "Missing, invalid or revoked API key.",
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/X-RateLimit-Limit"
+              },
+              "X-RateLimit-Limit-Day": {
+                "$ref": "#/components/headers/X-RateLimit-Limit-Day"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/X-RateLimit-Remaining"
+              },
+              "X-RateLimit-Remaining-Day": {
+                "$ref": "#/components/headers/X-RateLimit-Remaining-Day"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/X-RateLimit-Reset"
+              },
+              "X-Request-ID": {
+                "$ref": "#/components/headers/X-Request-ID"
+              }
+            }
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiDetailError"
+                }
+              }
+            },
+            "description": "Insufficient credits.",
             "headers": {
               "X-RateLimit-Limit": {
                 "$ref": "#/components/headers/X-RateLimit-Limit"
@@ -31856,9 +32170,6 @@
     },
     {
       "ApiKeyHeader": []
-    },
-    {
-      "ApiKeyQuery": []
     }
   ],
   "servers": [
@@ -31888,5 +32199,57 @@
       "description": "Your own credit balance: what is spendable right now, where it came from, and what is about to expire.\n\nFree and never charged, so it is safe to poll for low-balance alerting or to pre-flight a batch job.",
       "name": "Credits"
     }
-  ]
+  ],
+  "webhooks": {
+    "board.test": {
+      "post": {
+        "description": "Sent by `POST /watches/{watchId}/test`, signed and authenticated exactly like a real delivery. Headers: `Content-Type: application/json`, `X-Vaquill-Event: board.test`.\n\n**Verification.** Present only when the watch has a `webhookSecret`. Prefer the Standard Webhooks headers: `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (`v1,<base64>`, several space separated while a secret rotates), an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key is the base64 decoding of the secret after `whsec_` when it has that prefix, otherwise the secret's UTF-8 bytes. Verify against the raw bytes before parsing, and reject a timestamp more than 5 minutes old. `webhook-id` is stable across retries of one delivery. The legacy `X-Vaquill-Signature: sha256=<hex>` header (HMAC-SHA256 of the raw body) is also sent, is deprecated, and remains for at least 12 months. Respond with any 2xx to acknowledge; redirects are not followed.",
+        "operationId": "board_test_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardTestWebhookPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Acknowledge with any 2xx status."
+          }
+        },
+        "summary": "Webhook test delivery",
+        "tags": [
+          "Board Watches"
+        ]
+      }
+    },
+    "board.updated": {
+      "post": {
+        "description": "Sent to a watch's `webhookUrl` when its board refreshes with real changes, naming the sections that changed. Headers: `Content-Type: application/json`, `X-Vaquill-Event: board.updated`.\n\n**Verification.** Present only when the watch has a `webhookSecret`. Prefer the Standard Webhooks headers: `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (`v1,<base64>`, several space separated while a secret rotates), an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key is the base64 decoding of the secret after `whsec_` when it has that prefix, otherwise the secret's UTF-8 bytes. Verify against the raw bytes before parsing, and reject a timestamp more than 5 minutes old. `webhook-id` is stable across retries of one delivery. The legacy `X-Vaquill-Signature: sha256=<hex>` header (HMAC-SHA256 of the raw body) is also sent, is deprecated, and remains for at least 12 months. Respond with any 2xx to acknowledge; redirects are not followed.",
+        "operationId": "board_updated_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardUpdatedWebhookPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Acknowledge with any 2xx status."
+          }
+        },
+        "summary": "Law change alert",
+        "tags": [
+          "Board Watches"
+        ]
+      }
+    }
+  }
 }

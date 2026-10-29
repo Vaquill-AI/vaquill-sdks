@@ -2348,7 +2348,52 @@ export interface paths {
         trace?: never;
     };
 }
-export type webhooks = Record<string, never>;
+export interface webhooks {
+    "board.test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Webhook test delivery
+         * @description Sent by `POST /watches/{watchId}/test`, signed and authenticated exactly like a real delivery. Headers: `Content-Type: application/json`, `X-Vaquill-Event: board.test`.
+         *
+         *     **Verification.** Present only when the watch has a `webhookSecret`. Prefer the Standard Webhooks headers: `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (`v1,<base64>`, several space separated while a secret rotates), an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key is the base64 decoding of the secret after `whsec_` when it has that prefix, otherwise the secret's UTF-8 bytes. Verify against the raw bytes before parsing, and reject a timestamp more than 5 minutes old. `webhook-id` is stable across retries of one delivery. The legacy `X-Vaquill-Signature: sha256=<hex>` header (HMAC-SHA256 of the raw body) is also sent, is deprecated, and remains for at least 12 months. Respond with any 2xx to acknowledge; redirects are not followed.
+         */
+        post: operations["board_test_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "board.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Law change alert
+         * @description Sent to a watch's `webhookUrl` when its board refreshes with real changes, naming the sections that changed. Headers: `Content-Type: application/json`, `X-Vaquill-Event: board.updated`.
+         *
+         *     **Verification.** Present only when the watch has a `webhookSecret`. Prefer the Standard Webhooks headers: `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (`v1,<base64>`, several space separated while a secret rotates), an HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}`. The HMAC key is the base64 decoding of the secret after `whsec_` when it has that prefix, otherwise the secret's UTF-8 bytes. Verify against the raw bytes before parsing, and reject a timestamp more than 5 minutes old. `webhook-id` is stable across retries of one delivery. The legacy `X-Vaquill-Signature: sha256=<hex>` header (HMAC-SHA256 of the raw body) is also sent, is deprecated, and remains for at least 12 months. Respond with any 2xx to acknowledge; redirects are not followed.
+         */
+        post: operations["board_updated_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
 export interface components {
     schemas: {
         /**
@@ -2508,8 +2553,8 @@ export interface components {
             title?: string | null;
             /**
              * Type
-             * @description URL naming the error kind, `https://docs.vaquill.ai/errors/{code}`.
-             * @example https://docs.vaquill.ai/errors/insufficient_credits
+             * @description URL naming the error kind, `https://www.vaquill.ai/docs/errors/{code}`.
+             * @example https://www.vaquill.ai/docs/errors/insufficient_credits
              */
             type?: string | null;
         };
@@ -2721,6 +2766,129 @@ export interface components {
             sources?: components["schemas"]["ScopeChoice"][] | null;
             /** State */
             state?: string | null;
+        };
+        /**
+         * BoardTestWebhookPayload
+         * @description Body of a `board.test` delivery, sent by `POST /watches/{watchId}/test`.
+         */
+        BoardTestWebhookPayload: {
+            /** Boardlabel */
+            boardLabel: string;
+            /** Corpustype */
+            corpusType: string;
+            /**
+             * Event
+             * @constant
+             */
+            event: "board.test";
+            /**
+             * Firedat
+             * @description ISO 8601 time the delivery was built.
+             */
+            firedAt: string;
+            /** State */
+            state?: string | null;
+            /**
+             * Test
+             * @description Always true: marks the delivery as a manual test.
+             * @constant
+             */
+            test: true;
+        };
+        /**
+         * BoardUpdatedWebhookPayload
+         * @description Body of a `board.updated` delivery: a watched board refreshed with real changes.
+         */
+        BoardUpdatedWebhookPayload: {
+            /** Boardlabel */
+            boardLabel: string;
+            /**
+             * Changes
+             * @description Up to 10 changed sections. See `changesOverflowCount` for the rest.
+             */
+            changes: components["schemas"]["BoardWebhookChange"][];
+            /**
+             * Changesoverflowcount
+             * @description Changed sections beyond the ones in `changes`; page `GET /watches/{watchId}/changes` for them.
+             */
+            changesOverflowCount: number;
+            /** Corpustype */
+            corpusType: string;
+            /**
+             * Event
+             * @constant
+             */
+            event: "board.updated";
+            /**
+             * Firedat
+             * @description ISO 8601 time the delivery was built.
+             */
+            firedAt: string;
+            /** Refreshlogid */
+            refreshLogId?: number | null;
+            /**
+             * Rowsadded
+             * @description Stored rows (chunks), not sections.
+             */
+            rowsAdded: number;
+            /**
+             * Rowsdeleted
+             * @description Stored rows (chunks), not sections.
+             */
+            rowsDeleted: number;
+            /**
+             * Rowsupdated
+             * @description Stored rows (chunks), not sections.
+             */
+            rowsUpdated: number;
+            /**
+             * Scope
+             * @description The watch's scope, echoed so section counts can be read against it.
+             */
+            scope?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Sectionsadded
+             * @description Sections added. Absent when not counted.
+             */
+            sectionsAdded?: number | null;
+            /** Sectionsamended */
+            sectionsAmended?: number | null;
+            /** Sectionsremoved */
+            sectionsRemoved?: number | null;
+            /**
+             * State
+             * @description Null for a federal board.
+             */
+            state?: string | null;
+        };
+        /**
+         * BoardWebhookChange
+         * @description One `changes[]` item: a strict subset of a `GET /watches/{watchId}/changes` row.
+         */
+        BoardWebhookChange: {
+            /** Actid */
+            actId: string;
+            /**
+             * Changekind
+             * @enum {string}
+             */
+            changeKind: "added" | "amended" | "removed";
+            /** Citation */
+            citation?: string | null;
+            /**
+             * Detectedat
+             * @description When our refresh observed the change, not the date the law changed.
+             */
+            detectedAt?: string | null;
+            /**
+             * Id
+             * @description Change id. Pass it as `sinceId` or to the change diff route.
+             */
+            id: number;
+            /** Title */
+            title?: string | null;
         };
         /** BoardsEnvelope */
         BoardsEnvelope: {
@@ -4470,6 +4638,8 @@ export interface components {
             printedNoteCitations: string[];
             /** Processingtimems */
             processingTimeMs: number;
+            /** @description Present when the identifier sent was not the act_id served. */
+            resolvedFrom?: components["schemas"]["SectionIdentifierResolution"] | null;
             /** Unresolvedcitations */
             unresolvedCitations: string[];
             /** Versions */
@@ -9352,7 +9522,7 @@ export interface components {
             matchQuality?: ("exact" | "strong" | "moderate" | "weak" | "none") | null;
             /**
              * Nextoffset
-             * @description Present only with `matchType: "boolean"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset.
+             * @description Present only with `matchType: "boolean"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset. For every other `matchType` (`any`, `all`, `phrase`) the field is absent: while `hasMore` is true, request the next page with `offset` + `limit`.
              * @example 170
              */
             nextOffset?: number | null;
@@ -13197,6 +13367,21 @@ export interface operations {
                     "application/json": components["schemas"]["ApiDetailError"];
                 };
             };
+            /** @description Insufficient credits. */
+            402: {
+                headers: {
+                    "X-RateLimit-Limit": components["headers"]["X-RateLimit-Limit"];
+                    "X-RateLimit-Limit-Day": components["headers"]["X-RateLimit-Limit-Day"];
+                    "X-RateLimit-Remaining": components["headers"]["X-RateLimit-Remaining"];
+                    "X-RateLimit-Remaining-Day": components["headers"]["X-RateLimit-Remaining-Day"];
+                    "X-RateLimit-Reset": components["headers"]["X-RateLimit-Reset"];
+                    "X-Request-ID": components["headers"]["X-Request-ID"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiDetailError"];
+                };
+            };
             /** @description Section not found. `reason` says why and `didYouMean` what to send. */
             404: {
                 headers: {
@@ -13339,6 +13524,21 @@ export interface operations {
             };
             /** @description Missing, invalid or revoked API key. */
             401: {
+                headers: {
+                    "X-RateLimit-Limit": components["headers"]["X-RateLimit-Limit"];
+                    "X-RateLimit-Limit-Day": components["headers"]["X-RateLimit-Limit-Day"];
+                    "X-RateLimit-Remaining": components["headers"]["X-RateLimit-Remaining"];
+                    "X-RateLimit-Remaining-Day": components["headers"]["X-RateLimit-Remaining-Day"];
+                    "X-RateLimit-Reset": components["headers"]["X-RateLimit-Reset"];
+                    "X-Request-ID": components["headers"]["X-Request-ID"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiDetailError"];
+                };
+            };
+            /** @description Insufficient credits. */
+            402: {
                 headers: {
                     "X-RateLimit-Limit": components["headers"]["X-RateLimit-Limit"];
                     "X-RateLimit-Limit-Day": components["headers"]["X-RateLimit-Limit-Day"];
@@ -15961,6 +16161,50 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiDetailError"];
                 };
+            };
+        };
+    };
+    board_test_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BoardTestWebhookPayload"];
+            };
+        };
+        responses: {
+            /** @description Acknowledge with any 2xx status. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    board_updated_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BoardUpdatedWebhookPayload"];
+            };
+        };
+        responses: {
+            /** @description Acknowledge with any 2xx status. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

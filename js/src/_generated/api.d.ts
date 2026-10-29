@@ -83,6 +83,57 @@ export type BoardResponse = {
   sources?: ScopeChoice[] | null;
   state?: string | null;
 };
+/** Body of a `board.test` delivery, sent by `POST... */
+export type BoardTestWebhookPayload = {
+  boardLabel: string;
+  corpusType: string;
+  event: "board.test";
+  /** ISO 8601 time the delivery was built. */
+  firedAt: string;
+  state?: string | null;
+  /** Always true: marks the delivery as a manual test. */
+  test: true;
+};
+/** Body of a `board.updated` delivery: a watched board refreshed... */
+export type BoardUpdatedWebhookPayload = {
+  boardLabel: string;
+  /** Up to 10 changed sections. */
+  changes: BoardWebhookChange[];
+  /** Changed sections beyond the ones in `changes`; page `GET... */
+  changesOverflowCount: number;
+  corpusType: string;
+  event: "board.updated";
+  /** ISO 8601 time the delivery was built. */
+  firedAt: string;
+  refreshLogId?: number | null;
+  /** Stored rows (chunks), not sections. */
+  rowsAdded: number;
+  /** Stored rows (chunks), not sections. */
+  rowsDeleted: number;
+  /** Stored rows (chunks), not sections. */
+  rowsUpdated: number;
+  /** The watch's scope, echoed so section counts can be read against... */
+  scope?: {
+    [key: string]: string;
+  } | null;
+  /** Sections added. */
+  sectionsAdded?: number | null;
+  sectionsAmended?: number | null;
+  sectionsRemoved?: number | null;
+  /** Null for a federal board. */
+  state?: string | null;
+};
+/** One `changes[]` item: a strict subset of a `GET... */
+export type BoardWebhookChange = {
+  actId: string;
+  changeKind: "added" | "amended" | "removed";
+  citation?: string | null;
+  /** When our refresh observed the change, not the date the law... */
+  detectedAt?: string | null;
+  /** Change id. */
+  id: number;
+  title?: string | null;
+};
 export type BoardsEnvelope = {
   data: BoardsPage;
   meta: ResponseMeta;
@@ -727,6 +778,7 @@ export type SectionRulemakingResponse = {
   noteIsStale: boolean;
   printedNoteCitations: string[];
   processingTimeMs: number;
+  resolvedFrom?: SectionIdentifierResolution | null;
   unresolvedCitations: string[];
   versions: VersionMatchOut[];
 };
@@ -2791,6 +2843,16 @@ export interface OperationTypes {
    body: never;
    response: WatchTestEnvelope;
   };
+  board_test_webhook: {
+   query: never;
+   body: BoardTestWebhookPayload;
+   response: undefined;
+  };
+  board_updated_webhook: {
+   query: never;
+   body: BoardUpdatedWebhookPayload;
+   response: undefined;
+  };
 }
 export interface components {
  schemas: {
@@ -2798,6 +2860,9 @@ export interface components {
   "ApiCreditPricingResponse": ApiCreditPricingResponse;
   "AsOfProvenance": AsOfProvenance;
   "BoardResponse": BoardResponse;
+  "BoardTestWebhookPayload": BoardTestWebhookPayload;
+  "BoardUpdatedWebhookPayload": BoardUpdatedWebhookPayload;
+  "BoardWebhookChange": BoardWebhookChange;
   "BoardsEnvelope": BoardsEnvelope;
   "BoardsPage": BoardsPage;
   "BodyFigure": BodyFigure;

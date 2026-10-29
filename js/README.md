@@ -6,7 +6,8 @@ TypeScript client for the Vaquill US primary law Data API.
 It is a small handwritten layer over native `fetch` with zero runtime dependencies.
 Request and response types are generated from the OpenAPI document by `openapi-typescript` (a dev dependency only).
 
-Requires Node 20 or newer, Bun, Deno, or an edge runtime.
+Built on standard `fetch`; CI-tested on Node 20, 22 and 24.
+The public API follows semantic versioning and may change in minor versions before 1.0.
 Use it on a server.
 An API key in browser code is readable by anyone, and the client warns when it sees a browser.
 
@@ -18,7 +19,7 @@ const client = new Vaquill(); // reads VAQUILL_API_KEY (must start with vq_key_)
 const res = await client.statutes.search({ query: "assault with a deadly weapon", state: "tx" });
 console.log(res.results?.length, res.creditsConsumed);
 
-const { data, meta } = await client.statutes.getSection("TX_PE_22.01").withResponse();
+const { data, meta } = await client.statutes.getSection("USC_T42_C21_S1983").withResponse();
 console.log(meta.requestId, meta.creditsConsumed, meta.rateLimit.remainingDay);
 ```
 
@@ -68,6 +69,8 @@ A test derives this list from the spec, so it cannot drift.
 
 Charged: `statutes.search`, `getSection`, `getSectionBody`, `getSectionNeighbors`, `getSections`, `count`, `listDivisions`, `getSectionChanges`, `getSectionEnactments`, `getSectionRulemaking`, `getPartRulemaking`, `getSectionCitedBy`, `getSectionDefinitions`, `getSectionCrossState`, `resolve`, `resolveBatch`, `extractCitations`; `sessionLaws.search`, `list`, `get`, `getBody`, `getVersions`, `getChanges`, `getBatch`; `watches.getChangeDiff`.
 That is 25 operations. The `*All` iterators call these and spend per page.
+
+`statutes.extractCitations` costs 0 credits when `resolve: false` and 2 credits per distinct citation otherwise.
 
 Free: `statutes.coverage`, `watches.list`, `create`, `update`, `delete`, `test`, `listChanges`, `listDeliveries`, `boards.list`, `credits.balance`, `pricing.get`.
 

@@ -36,6 +36,15 @@ def _key(secret: str) -> bytes:
     return secret.encode("utf-8")
 
 
+def _require_secrets(secrets: Sequence[str]) -> None:
+    """An unset environment variable must never verify a forged event: refuse a blank secret."""
+    if not secrets:
+        raise ValueError("A webhook secret is required.")
+    for s in secrets:
+        if not isinstance(s, str) or not s.strip() or s.strip() == SECRET_PREFIX:  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ValueError("The webhook secret is empty or blank.")
+
+
 def _any_match(candidates: Sequence[str], expected: Sequence[str]) -> bool:
     # No early exit: every comparison runs so timing does not reveal which one matched.
     matched = False
@@ -61,7 +70,9 @@ def verify_webhook(
     """Verify a delivery and return its parsed event. Raises ``WebhookVerificationError``.
 
     ``payload`` must be the raw request body, never re-serialised JSON. ``secret`` may be a
-    list to accept both secrets during a rotation.
+    list to accept both secrets during a rotation. Raises ``ValueError`` (not a verification
+    error) for an empty or whitespace-only secret, so a missing configuration value is a loud
+    failure and can never accept a forged event.
 
     Standard Webhooks (``webhook-id``, ``webhook-timestamp``, ``webhook-signature``) is
     checked first, with a ``tolerance`` window in seconds either side of ``now``.
@@ -74,6 +85,7 @@ def verify_webhook(
     body = payload.encode("utf-8") if isinstance(payload, str) else payload
     h = {k.lower(): v for k, v in headers.items()}
     secrets = [secret] if isinstance(secret, str) else list(secret)
+    _require_secrets(secrets)
 
     msg_id, stamp, sig = h.get("webhook-id"), h.get("webhook-timestamp"), h.get("webhook-signature")
     if msg_id and stamp and sig:

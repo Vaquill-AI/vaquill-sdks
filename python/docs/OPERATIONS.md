@@ -87,3 +87,31 @@ All accept `max_pages` and `max_items`. On a charged helper every page spends cr
 | `client.watches.iter_list` | `list_watches` | offset | free |
 | `client.watches.iter_changes` | `list_watch_changes` | `beforeId` or `sinceId` (`order="asc"`) | free |
 | `client.boards.iter_list` | `list_boards` | offset (`hasMore`) | free |
+| `client.session_laws.iter_body` | `get_session_law_body` | cursor (`nextCursor`, `hasMore`), one `SessionLawBodyResponse` per page | charged |
+
+Two guards stop an iteration without a `max_pages` or `max_items`.
+`truncated` is True whenever a guard left rows unread, including a `max_items` that cut items off the last page.
+`stuck` is True when the server returned the offset or cursor it was just sent, or an empty page with `hasMore: true`.
+The iterator then stops, logs a warning on the `vaquill` logger and does not fetch again, so a misbehaving server cannot burn credits.
+
+## Batch helpers
+
+Each wraps one batch operation, splits the input at the spec's per-call cap and returns the members of every response as one flat list in input order.
+The `max_credits` spend guard is checked before every chunk, so a guard reached part way raises `SpendGuardExceeded` and the remaining chunks are not sent.
+Exact repeats in the input are sent once.
+A caller's `idempotency_key` is kept for the first chunk and suffixed with `-<chunk number>` for later ones.
+An empty input sends nothing and returns `[]`.
+
+| Helper | Wraps | Cap per call | Returns | Cost |
+| --- | --- | --- | --- | --- |
+| `client.statutes.resolve_batch_all` | `resolve_statute_citations_batch` | 500 | `results` (`StatuteResolveBatchItem`) | charged |
+| `client.statutes.get_sections_all` | `get_sections_batch` | 50 | `sections` (`StatuteResult`) | charged |
+| `client.session_laws.get_batch_all` | `get_session_laws_batch` | 200 | `laws` (`SessionLawBatchLaw`) | charged |
+
+`get_sections_all` and `get_batch_all` drop ids with no match; call the single-call method to read `notFound`.
+
+## Argument checks
+
+A path argument that is empty, `.` or `..` raises `ValueError` before any request, because a URL parser would resolve it to another endpoint.
+`verify_webhook` raises `ValueError` for an empty or whitespace-only secret (or `whsec_` with no key), so an unset environment variable cannot verify a forged event.
+`extract_citations` costs 0 credits when `resolve=False`.

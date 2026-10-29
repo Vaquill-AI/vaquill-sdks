@@ -1,6 +1,6 @@
 {
   "name": "@vaquill-ai/sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "TypeScript client for the Vaquill US primary law Data API.",
   "license": "MIT",
   "author": "Vaquill",
@@ -47,7 +47,8 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
-      }
+      },
+      "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -57,6 +58,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "gen:aliases": "node scripts/gen-schema-aliases.mjs",
     "gen": "openapi-typescript ../openapi/vaquill-us.json --default-non-nullable false -o src/_generated/schema.d.ts && node scripts/prune-types.mjs",
     "build": "tsup",
     "typecheck": "tsc --noEmit",

@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, cast
 
 import httpx
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr, ValidationError
 from pydantic.alias_generators import to_camel
 
 from ._config import REPLAYED_HEADER, REQUEST_ID_HEADER
+from ._errors import ResponseParseError
 
 __all__ = [
     "APIResponse",
@@ -147,7 +148,15 @@ class APIResponse(Generic[T]):
         return self._data
 
     def parse(self) -> T:
-        parsed = self._cast(self._data)
+        try:
+            parsed = self._cast(self._data)
+        except ValidationError as exc:
+            raise ResponseParseError(
+                f"Response did not match the expected shape ({exc.error_count()} validation "
+                f"errors in {exc.title}).",
+                request_id=self.request_id,
+                status_code=self.status_code,
+            ) from exc
         if isinstance(parsed, ResponseModel):
             parsed._request_id = self.request_id  # pyright: ignore[reportPrivateUsage]
             parsed._idempotent_replayed = self.idempotent_replayed  # pyright: ignore[reportPrivateUsage]

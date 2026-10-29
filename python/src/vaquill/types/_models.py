@@ -246,6 +246,55 @@ class AsOfProvenance(VaquillModel):
     ]
 
 
+class BoardTestWebhookPayload(VaquillModel):
+    board_label: Annotated[str, Field(alias="boardLabel", title="Boardlabel")]
+    corpus_type: Annotated[str, Field(alias="corpusType", title="Corpustype")]
+    event: Annotated[Literal["board.test"] | str, Field(title="Event")]
+    fired_at: Annotated[
+        str,
+        Field(
+            alias="firedAt", description="ISO 8601 time the delivery was built.", title="Firedat"
+        ),
+    ]
+    state: Annotated[str | None, Field(title="State")] = None
+    test: Annotated[
+        Literal[True] | str,
+        Field(description="Always true: marks the delivery as a manual test.", title="Test"),
+    ]
+
+
+class BoardWebhookChangeChangeKind(StrEnum):
+    added = "added"
+    amended = "amended"
+    removed = "removed"
+
+
+class BoardWebhookChange(VaquillModel):
+    act_id: Annotated[str, Field(alias="actId", title="Actid")]
+    change_kind: Annotated[
+        Annotated[
+            BoardWebhookChangeChangeKind | str, lenient_validator(BoardWebhookChangeChangeKind)
+        ],
+        Field(alias="changeKind", title="Changekind"),
+    ]
+    citation: Annotated[str | None, Field(title="Citation")] = None
+    detected_at: Annotated[
+        str | None,
+        Field(
+            alias="detectedAt",
+            description="When our refresh observed the change, not the date the law changed.",
+            title="Detectedat",
+        ),
+    ] = None
+    id: Annotated[
+        int,
+        Field(
+            description="Change id. Pass it as `sinceId` or to the change diff route.", title="Id"
+        ),
+    ]
+    title: Annotated[str | None, Field(title="Title")] = None
+
+
 class BodyFigureKind(StrEnum):
     figure = "figure"
     equation = "equation"
@@ -3238,16 +3287,10 @@ class StatuteBodyResponseBodyUnavailableReason(
     ] = None
 
 
-class StatuteChangeEventChangeKind(StrEnum):
-    added = "added"
-    amended = "amended"
-    removed = "removed"
-
-
 class StatuteChangeEvent(VaquillModel):
     change_kind: Annotated[
         Annotated[
-            StatuteChangeEventChangeKind | str, lenient_validator(StatuteChangeEventChangeKind)
+            BoardWebhookChangeChangeKind | str, lenient_validator(BoardWebhookChangeChangeKind)
         ],
         Field(
             alias="changeKind",
@@ -6024,8 +6067,8 @@ class ApiDetailError(VaquillModel):
     type: Annotated[
         str | None,
         Field(
-            description="URL naming the error kind, `https://docs.vaquill.ai/errors/{code}`.",
-            examples=["https://docs.vaquill.ai/errors/insufficient_credits"],
+            description="URL naming the error kind, `https://www.vaquill.ai/docs/errors/{code}`.",
+            examples=["https://www.vaquill.ai/docs/errors/insufficient_credits"],
             title="Type",
         ),
     ] = None
@@ -6107,6 +6150,80 @@ class BoardResponse(VaquillModel):
         ),
     ] = None
     state: Annotated[str | None, Field(title="State")] = None
+
+
+class BoardUpdatedWebhookPayload(VaquillModel):
+    board_label: Annotated[str, Field(alias="boardLabel", title="Boardlabel")]
+    changes: Annotated[
+        list[BoardWebhookChange],
+        Field(
+            description="Up to 10 changed sections. See `changesOverflowCount` for the rest.",
+            title="Changes",
+        ),
+    ]
+    changes_overflow_count: Annotated[
+        int,
+        Field(
+            alias="changesOverflowCount",
+            description="Changed sections beyond the ones in `changes`; page `GET /watches/{watchId}/changes` for them.",
+            title="Changesoverflowcount",
+        ),
+    ]
+    corpus_type: Annotated[str, Field(alias="corpusType", title="Corpustype")]
+    event: Annotated[Literal["board.updated"] | str, Field(title="Event")]
+    fired_at: Annotated[
+        str,
+        Field(
+            alias="firedAt", description="ISO 8601 time the delivery was built.", title="Firedat"
+        ),
+    ]
+    refresh_log_id: Annotated[int | None, Field(alias="refreshLogId", title="Refreshlogid")] = None
+    rows_added: Annotated[
+        int,
+        Field(
+            alias="rowsAdded", description="Stored rows (chunks), not sections.", title="Rowsadded"
+        ),
+    ]
+    rows_deleted: Annotated[
+        int,
+        Field(
+            alias="rowsDeleted",
+            description="Stored rows (chunks), not sections.",
+            title="Rowsdeleted",
+        ),
+    ]
+    rows_updated: Annotated[
+        int,
+        Field(
+            alias="rowsUpdated",
+            description="Stored rows (chunks), not sections.",
+            title="Rowsupdated",
+        ),
+    ]
+    scope: Annotated[
+        dict[str, str] | None,
+        Field(
+            description="The watch's scope, echoed so section counts can be read against it.",
+            title="Scope",
+        ),
+    ] = None
+    sections_added: Annotated[
+        int | None,
+        Field(
+            alias="sectionsAdded",
+            description="Sections added. Absent when not counted.",
+            title="Sectionsadded",
+        ),
+    ] = None
+    sections_amended: Annotated[
+        int | None, Field(alias="sectionsAmended", title="Sectionsamended")
+    ] = None
+    sections_removed: Annotated[
+        int | None, Field(alias="sectionsRemoved", title="Sectionsremoved")
+    ] = None
+    state: Annotated[str | None, Field(description="Null for a federal board.", title="State")] = (
+        None
+    )
 
 
 class BoardsPage(VaquillModel):
@@ -6685,6 +6802,13 @@ class SectionRulemakingResponse(ResponseModel):
         list[str], Field(alias="printedNoteCitations", title="Printednotecitations")
     ]
     processing_time_ms: Annotated[float, Field(alias="processingTimeMs", title="Processingtimems")]
+    resolved_from: Annotated[
+        SectionIdentifierResolution | None,
+        Field(
+            alias="resolvedFrom",
+            description="Present when the identifier sent was not the act_id served.",
+        ),
+    ] = None
     unresolved_citations: Annotated[
         list[str], Field(alias="unresolvedCitations", title="Unresolvedcitations")
     ]
@@ -9096,7 +9220,7 @@ class StatuteSearchResponse(ResponseModel):
         int | None,
         Field(
             alias="nextOffset",
-            description='Present only with `matchType: "boolean"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset.',
+            description='Present only with `matchType: "boolean"` while `hasMore` is true: the `offset` to send for the next page. Usually `offset` + `limit`. Past the relevance-ranked results a page can hold fewer rows than `limit` (candidates outside your filters, or failing the expression on full-text verification, are left out), and when verification runs out of time the page stops early and `nextOffset` resumes exactly where it stopped. Follow it rather than computing the offset. For every other `matchType` (`any`, `all`, `phrase`) the field is absent: while `hasMore` is true, request the next page with `offset` + `limit`.',
             examples=[170],
             title="Nextoffset",
         ),

@@ -23,17 +23,19 @@ export class WatchesResource {
     return this.t.request({ method: "GET", path: BASE, query }, options);
   }
 
-  /** Iterate all watches by offset. */
+  /**
+   * Iterate all watches by offset. Stops on an empty page or an explicit `meta.hasMore: false`,
+   * never on a short page: the server may clamp `limit` below what was asked for.
+   */
   listAll(query?: QueryOf<"list_watches">, limits?: PaginationLimits, options?: RequestOptions) {
-    const size = query?.limit;
     return new PageIterator(
       query?.offset ?? 0,
       (offset) => this.list({ ...query, offset }, options),
       (page) => page.data?.watches ?? [],
       (page, offset) => {
         const n = page.data?.watches?.length ?? 0;
-        // No hasMore on this envelope: a short or empty page is the last one.
-        return n > 0 && (size === undefined || n >= size) ? offset + n : undefined;
+        if (n === 0 || page.meta?.hasMore === false) return undefined;
+        return offset + n;
       },
       limits,
     );

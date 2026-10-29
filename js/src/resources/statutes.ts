@@ -9,6 +9,15 @@ import {
 } from "../pagination.js";
 import type { APIPromise } from "../response.js";
 import type { BodyOf, QueryOf, ResponseOf } from "../types.js";
+import { type BatchAllOptions, chunkSizeFor, distinct, runChunks } from "./_batch.js";
+
+/** Per-call caps from the OpenAPI spec (`maxItems`). */
+export const RESOLVE_BATCH_MAX = 500;
+export const SECTIONS_BATCH_MAX = 50;
+
+type ArrayItem<T> = T extends readonly (infer U)[] ? U : never;
+type SectionRow = ArrayItem<NonNullable<ResponseOf<"get_sections_batch">["sections"]>>;
+type ResolveRow = ArrayItem<NonNullable<ResponseOf<"resolve_statute_citations_batch">["results"]>>;
 
 const BASE = "/api/v1/us/statutes";
 const sec = (actId: string) => `${BASE}/section/${encodeURIComponent(actId)}`;
@@ -77,6 +86,27 @@ export class StatutesResource {
     return this.t.request(
       { method: "POST", path: `${BASE}/sections`, body, charged: true },
       options,
+    );
+  }
+
+  /**
+   * `get_sections_batch` over any number of ids. Sends at most 50 (the spec's per-call cap) per
+   * request, drops exact repeats, and returns the `sections` of every call as one flat list in
+   * order. Ids with no match are dropped (use `getSections` to see `notFound`). Charged per
+   * section; the client's spend guard is checked before each chunk. Empty input sends nothing.
+   */
+  getSectionsAll(
+    actIds: readonly string[],
+    params?: Omit<BodyOf<"get_sections_batch">, "actIds">,
+    options?: BatchAllOptions,
+  ): Promise<SectionRow[]> {
+    return runChunks(
+      distinct(actIds),
+      chunkSizeFor(SECTIONS_BATCH_MAX, options?.chunkSize),
+      options,
+      async (part, o) =>
+        (await this.getSections({ ...params, actIds: part } as BodyOf<"get_sections_batch">, o))
+          .sections,
     );
   }
 
@@ -258,6 +288,31 @@ export class StatutesResource {
     return this.t.request(
       { method: "POST", path: `${BASE}/resolve`, body, charged: true },
       options,
+    );
+  }
+
+  /**
+   * `resolve_statute_citations_batch` over any number of citations. Sends at most 500 (the spec's
+   * per-call cap) per request, drops exact repeats, and returns the `results` of every call as
+   * one flat list in order. Charged per citation; the spend guard is checked before each chunk.
+   * Empty input sends nothing.
+   */
+  resolveBatchAll(
+    citations: readonly string[],
+    params?: Omit<BodyOf<"resolve_statute_citations_batch">, "citations">,
+    options?: BatchAllOptions,
+  ): Promise<ResolveRow[]> {
+    return runChunks(
+      distinct(citations),
+      chunkSizeFor(RESOLVE_BATCH_MAX, options?.chunkSize),
+      options,
+      async (part, o) =>
+        (
+          await this.resolveBatch(
+            { ...params, citations: part } as BodyOf<"resolve_statute_citations_batch">,
+            o,
+          )
+        ).results,
     );
   }
 

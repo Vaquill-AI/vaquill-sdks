@@ -189,12 +189,13 @@ def test_charged_post_without_key_not_retried_after_read_error(sleeps: list[floa
     assert len(script.requests) == 1
 
 
-def test_charged_post_without_key_still_retries_connect_failure_and_5xx(
+def test_charged_post_without_key_retries_connect_failure_but_not_5xx(
     sleeps: list[float],
 ) -> None:
     script = Script(httpx.ConnectError("refused"), err(500, "internal_error"), OK)
-    make(script, idempotency_keys=False).raw_request("POST", "/x", **req())
-    assert len(script.requests) == 3
+    with pytest.raises(InternalServerError):
+        make(script, idempotency_keys=False).raw_request("POST", "/x", **req())
+    assert len(script.requests) == 2
 
 
 def test_charged_post_with_caller_key_retries_even_when_auto_keys_off(sleeps: list[float]) -> None:

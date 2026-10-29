@@ -65,8 +65,11 @@ def test_iter_search_chains_offsets_and_counts_credits() -> None:
 def test_max_pages_stops_a_charged_iteration_and_flags_truncation() -> None:
     seen: list[httpx.Request] = []
     base = sample(BY_ID["search_statutes"].response or {})
-    page = {**base, "results": [item("StatuteResult")], "nextOffset": 5, "creditsConsumed": 4}
-    client = sync_client(page_server([page, page, page], seen))
+    pages = [
+        {**base, "results": [item("StatuteResult")], "nextOffset": n, "creditsConsumed": 4}
+        for n in (5, 10, 15)
+    ]
+    client = sync_client(page_server(pages, seen))
     pager = client.statutes.iter_search("x", max_pages=2)
     assert len(list(pager)) == 2
     assert len(seen) == 2

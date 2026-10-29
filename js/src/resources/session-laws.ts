@@ -8,6 +8,12 @@ import {
 } from "../pagination.js";
 import type { APIPromise } from "../response.js";
 import type { BodyOf, QueryOf, ResponseOf } from "../types.js";
+import { type BatchAllOptions, chunkSizeFor, distinct, runChunks } from "./_batch.js";
+
+/** Per-call cap from the OpenAPI spec (`maxItems` on `ids`). */
+export const SESSION_LAWS_BATCH_MAX = 200;
+
+type LawRow = NonNullable<ResponseOf<"get_session_laws_batch">["laws"]>[number];
 
 const BASE = "/api/v1/us/session-laws";
 const one = (id: string) => `${BASE}/${encodeURIComponent(id)}`;
@@ -86,6 +92,46 @@ export class SessionLawsResource {
     );
   }
 
+  /**
+   * Walk a law's text page by page. Each item is one body page (`text`, `pageStart`, `pageEnd`,
+   * ...); concatenate their `text`. Every page is charged, and a long act is hundreds of pages:
+   * set `maxPages` or a client `maxCredits`. Stops on a falsy `nextCursor`, `hasMore: false`, or
+   * `pageEnd >= totalChars` (`totalPages` is only an estimate and is never a stop condition).
+   * `startChar` applies to the first page only; the cursor carries the position after that.
+   * `iter.truncated` is true when `maxPages` stopped it with text left.
+   */
+  iterBody(
+    sessionLawId: string,
+    query?: QueryOf<"get_session_law_body">,
+    limits?: PaginationLimits,
+    options?: RequestOptions,
+  ) {
+    return new PageIterator(
+      query?.cursor ?? undefined,
+      (cursor) => {
+        const { startChar: _firstPageOnly, ...rest } = query ?? {};
+        return this.getBody(
+          sessionLawId,
+          cursor === undefined ? query : { ...rest, cursor },
+          options,
+        );
+      },
+      (page) => [page],
+      (page) => {
+        if (!page.hasMore) return undefined;
+        if (
+          typeof page.pageEnd === "number" &&
+          typeof page.totalChars === "number" &&
+          page.pageEnd >= page.totalChars
+        ) {
+          return undefined;
+        }
+        return nextByCursor(page.nextCursor);
+      },
+      limits,
+    );
+  }
+
   /** `get_session_law_versions`. Charged. */
   getVersions(
     sessionLawId: string,
@@ -129,5 +175,25 @@ export class SessionLawsResource {
     options?: RequestOptions,
   ): APIPromise<ResponseOf<"get_session_laws_batch">> {
     return this.t.request({ method: "POST", path: `${BASE}/batch`, body, charged: true }, options);
+  }
+
+  /**
+   * `get_session_laws_batch` over any number of ids or citations. Sends at most 200 (the spec's
+   * per-call cap) per request, drops exact repeats, and returns the `laws` of every call as one
+   * flat list in order. Ids with no match are dropped (use `getBatch` to see `notFound`).
+   * Charged per law; the spend guard is checked before each chunk. Empty input sends nothing.
+   */
+  getBatchAll(
+    ids: readonly string[],
+    params?: Omit<BodyOf<"get_session_laws_batch">, "ids">,
+    options?: BatchAllOptions,
+  ): Promise<LawRow[]> {
+    return runChunks(
+      distinct(ids),
+      chunkSizeFor(SESSION_LAWS_BATCH_MAX, options?.chunkSize),
+      options,
+      async (part, o) =>
+        (await this.getBatch({ ...params, ids: part } as BodyOf<"get_session_laws_batch">, o)).laws,
+    );
   }
 }

@@ -30,6 +30,7 @@ __all__ = [
     "NotFoundError",
     "PermissionDeniedError",
     "RateLimitError",
+    "ResponseParseError",
     "SpendGuardExceeded",
     "UnprocessableEntityError",
     "VaquillError",
@@ -56,6 +57,25 @@ class VaquillError(Exception):
 
 class SpendGuardExceeded(VaquillError):
     """The client-side ``max_credits`` cap was reached; no request was sent."""
+
+
+class ResponseParseError(VaquillError):
+    """A 2xx response could not be parsed into the expected model (bad JSON or wrong shape)."""
+
+    def __init__(
+        self, message: str, *, request_id: str | None = None, status_code: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.request_id = request_id
+        self.status_code = status_code
+
+    @property
+    def status(self) -> int | None:
+        return self.status_code
+
+    def __str__(self) -> str:
+        return f"{self.message} (status={self.status_code}, request_id={self.request_id})"
 
 
 class WebhookVerificationError(VaquillError):
@@ -188,12 +208,40 @@ _BY_STATUS: dict[int, type[APIStatusError]] = {
 }
 
 
+def _validation_summary(errors: Any) -> str | None:
+    """First few `loc: msg` pairs of a 422 `errors` list, or None."""
+    if not isinstance(errors, list):
+        return None
+    items = cast("list[Any]", errors)
+    parts: list[str] = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        item = cast("dict[str, Any]", raw)
+        if not isinstance(item.get("msg"), str) or not item["msg"]:
+            continue
+        loc = item.get("loc")
+        path: list[Any] = list(cast("list[Any]", loc)) if isinstance(loc, list) else []
+        if len(path) > 1 and str(path[0]) in ("body", "query", "path", "header"):
+            path = path[1:]
+        where = ".".join(str(p) for p in path)
+        parts.append(f"{where}: {item['msg']}" if where else item["msg"])
+    if not parts:
+        return None
+    shown = "; ".join(parts[:3])
+    more = len(items) - min(len(parts), 3)
+    return f"{shown} (+{more} more)" if more > 0 else shown
+
+
 def _message(status: int, body: Any) -> str:
     env = _envelope(body)
-    for member in ("detail", "title"):
-        text = env.get(member)
-        if isinstance(text, str) and text:
-            return text
+    detail = env.get("detail")
+    if isinstance(detail, str) and detail:
+        why = _validation_summary(env.get("errors")) if status == 422 else None
+        return f"{detail}: {why}" if why else detail
+    title = env.get("title")
+    if isinstance(title, str) and title:
+        return title
     return f"HTTP {status}"
 
 

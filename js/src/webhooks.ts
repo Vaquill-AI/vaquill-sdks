@@ -27,14 +27,110 @@ export interface VerifyOptions {
   now?: number;
 }
 
+/**
+ * The envelope every delivery shares: the body is `{ event, ...payload, firedAt }` with
+ * camelCase keys (see the Python SDK's `WebhookEvent`, which keeps the rest as extras).
+ */
+export interface WebhookEventBase {
+  /** Event name, such as `board.updated`. */
+  event: string;
+  /** ISO-8601 time the delivery was fired. */
+  firedAt?: string;
+  /** Members this SDK version does not type are kept, not dropped. */
+  [key: string]: unknown;
+}
+
+/** One change line inside a `board.updated` delivery. Shape follows the Law Change Alerts feed. */
+export type WebhookChange = Record<string, unknown>;
+
+/** A real law-change delivery for a watch. */
+export interface BoardUpdatedEvent extends WebhookEventBase {
+  event: "board.updated";
+  /** Stable per (watch, refresh event): the key to deduplicate redeliveries on. */
+  deliveryId?: string;
+  corpusType?: string;
+  state?: string | null;
+  boardLabel?: string;
+  /** Which population the `sections*` counters were counted over. */
+  scope?: unknown;
+  rowsAdded?: number;
+  rowsUpdated?: number;
+  rowsDeleted?: number;
+  /** Present when section counts were computed for this refresh. */
+  sectionsAdded?: number;
+  sectionsAmended?: number;
+  sectionsRemoved?: number;
+  refreshLogId?: string | number | null;
+  changes?: WebhookChange[];
+  changesOverflowCount?: number;
+}
+
+/** The delivery `watches.test(...)` sends. */
+export interface BoardTestEvent extends WebhookEventBase {
+  event: "board.test";
+  corpusType?: string;
+  state?: string | null;
+  boardLabel?: string;
+  test: true;
+}
+
+/** An event name this SDK version does not know yet. */
+export type UnknownWebhookEvent = WebhookEventBase;
+
+/**
+ * A verified delivery. Narrow on `event`; the last member keeps event names added later
+ * usable instead of failing, so a narrowed branch still includes it.
+ */
+export type WebhookEvent = BoardUpdatedEvent | BoardTestEvent | UnknownWebhookEvent;
+
 const enc = new TextEncoder();
 
-function header(headers: HeaderBag, name: string): string | undefined {
-  if (headers instanceof Headers) return headers.get(name) ?? undefined;
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === name) return Array.isArray(v) ? v[0] : v;
+/** Every value of a header, lower-case name lookup. A multi-valued header yields all its values. */
+function headerValues(headers: HeaderBag, name: string): string[] | undefined {
+  if (headers instanceof Headers) {
+    const v = headers.get(name);
+    return v === null ? undefined : [v];
   }
-  return undefined;
+  const out: string[] = [];
+  let found = false;
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() !== name || v === undefined) continue;
+    found = true;
+    if (Array.isArray(v)) out.push(...v);
+    else out.push(v);
+  }
+  return found ? out : undefined;
+}
+
+/**
+ * One value for a header that must be single (`webhook-id`, `webhook-timestamp`). Repeated
+ * copies that agree are fine; copies that disagree are ambiguous, so the delivery is refused
+ * instead of silently trusting the first.
+ */
+function singleHeader(headers: HeaderBag, name: string): string | undefined {
+  const values = headerValues(headers, name);
+  if (!values || values.length === 0) return undefined;
+  const distinct = new Set(values.map((v) => v.trim()));
+  if (distinct.size > 1) {
+    throw new WebhookVerificationError(`Conflicting ${name} header values.`);
+  }
+  return values[0];
+}
+
+/** The signature header, with every element of a multi-valued header joined by a space. */
+function signatureHeader(headers: HeaderBag): string | undefined {
+  const values = headerValues(headers, "webhook-signature");
+  if (!values || values.length === 0) return undefined;
+  return values.join(" ");
+}
+
+/** Every `v1,<base64>` candidate in a signature header, however the copies were joined. */
+function v1Signatures(value: string): string[] {
+  const out: string[] = [];
+  for (const m of value.matchAll(/(?:^|[\s,])v1,([A-Za-z0-9+/=]+)/g)) {
+    if (m[1]) out.push(m[1]);
+  }
+  return out;
 }
 
 function toBytes(payload: string | Uint8Array): Uint8Array<ArrayBuffer> {
@@ -88,6 +184,9 @@ export async function signWebhook(
   payload: string | Uint8Array,
   secret: string,
 ): Promise<string> {
+  if (typeof secret !== "string" || !usableSecret(secret)) {
+    throw new WebhookVerificationError("No webhook secret configured.");
+  }
   const body = toBytes(payload);
   const prefix = enc.encode(`${id}.${timestamp}.`);
   const signed = new Uint8Array(prefix.length + body.length);
@@ -114,6 +213,25 @@ async function matches(
 }
 
 /**
+ * The usable secrets, or a throw. An empty, blank or non-string secret (an unset environment
+ * variable is the usual cause) must never verify anything: an HMAC keyed with "" is computable
+ * by anyone, so it would accept forged events.
+ */
+function normaliseSecrets(secret: WebhookSecret | null | undefined): string[] {
+  const list: unknown[] =
+    typeof secret === "string" ? [secret] : Array.isArray(secret) ? [...secret] : [];
+  if (list.length === 0 || list.some((s) => typeof s !== "string" || usableSecret(s) === false)) {
+    throw new WebhookVerificationError("No webhook secret configured.");
+  }
+  return list as string[];
+}
+
+function usableSecret(s: string): boolean {
+  const t = s.trim();
+  return t.length > 0 && t !== SECRET_PREFIX;
+}
+
+/**
  * Verify a delivery. Resolves on success and throws `WebhookVerificationError` on any failure.
  * `secret` may be a list during rotation: a signature made by any of them passes.
  */
@@ -123,17 +241,14 @@ export async function verifyWebhook(
   secret: WebhookSecret,
   options: VerifyOptions = {},
 ): Promise<void> {
-  const secrets = typeof secret === "string" ? [secret] : [...secret];
-  if (secrets.length === 0 || secrets.some((s) => !s)) {
-    throw new WebhookVerificationError("No webhook secret configured.");
-  }
+  const secrets = normaliseSecrets(secret);
   const body = toBytes(payload);
-  const id = header(headers, "webhook-id");
-  const ts = header(headers, "webhook-timestamp");
-  const sigHeader = header(headers, "webhook-signature");
+  const id = singleHeader(headers, "webhook-id");
+  const ts = singleHeader(headers, "webhook-timestamp");
+  const sigHeader = signatureHeader(headers);
 
   if (id === undefined && ts === undefined && sigHeader === undefined) {
-    const legacy = header(headers, "x-vaquill-signature");
+    const legacy = singleHeader(headers, "x-vaquill-signature");
     if (options.allowLegacy && legacy !== undefined) {
       await verifyLegacy(body, legacy, secrets);
       return;
@@ -158,9 +273,7 @@ export async function verifyWebhook(
   signed.set(body, prefix.length);
 
   let ok = false;
-  for (const part of sigHeader.split(" ")) {
-    const [version, sig] = part.split(",", 2);
-    if (version !== "v1" || !sig) continue;
+  for (const sig of v1Signatures(sigHeader)) {
     const bytes = b64decode(sig);
     if (bytes && (await matches(secrets, bytes, signed, deriveKey))) ok = true;
   }
@@ -182,8 +295,14 @@ async function verifyLegacy(
   }
 }
 
-/** Verify, then parse the body as JSON. */
-export async function unwrapWebhook<T = unknown>(
+/**
+ * Verify, then parse the body as JSON and return it typed as a `WebhookEvent`.
+ *
+ * The signature is the trust boundary: `event` is not validated beyond the body being a JSON
+ * object, so an event type added by the server later still arrives (as `UnknownWebhookEvent`).
+ * Escape hatch: pass your own type, `unwrapWebhook<MyPayload>(...)`, to skip the built-in one.
+ */
+export async function unwrapWebhook<T = WebhookEvent>(
   payload: string | Uint8Array,
   headers: HeaderBag,
   secret: WebhookSecret,
@@ -191,12 +310,31 @@ export async function unwrapWebhook<T = unknown>(
 ): Promise<T> {
   await verifyWebhook(payload, headers, secret, options);
   const text = typeof payload === "string" ? payload : new TextDecoder().decode(payload);
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as T;
+    parsed = JSON.parse(text);
   } catch {
     throw new WebhookVerificationError("Webhook body is not valid JSON.");
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new WebhookVerificationError("Webhook body is not a JSON object.");
+  }
+  return parsed as T;
+}
+
+/** True for an object shaped like a Vaquill event: a string `event`. A runtime narrowing helper. */
+export function isWebhookEvent(value: unknown): value is WebhookEvent {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { event?: unknown }).event === "string"
+  );
 }
 
 /** Namespace form: `webhooks.verify(...)`. */
-export const webhooks = { verify: verifyWebhook, unwrap: unwrapWebhook, sign: signWebhook };
+export const webhooks = {
+  verify: verifyWebhook,
+  unwrap: unwrapWebhook,
+  sign: signWebhook,
+  isEvent: isWebhookEvent,
+};

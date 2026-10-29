@@ -19,6 +19,8 @@ export function shouldRetryStatus(err: APIStatusError, replaySafe: boolean): boo
   const { status, code } = err;
   if (status === 402 || (code && NEVER_RETRY_CODES.has(code))) return false;
   if (err.retryable === false) return false;
+  // 501 Not Implemented is permanent: another attempt cannot succeed.
+  if (status === 501) return false;
   if (status === 409) return code === "idempotency_in_progress" && replaySafe;
   if (status === 429) return true;
   if (status === 408 || status >= 500) return replaySafe;

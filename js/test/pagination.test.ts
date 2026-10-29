@@ -108,14 +108,15 @@ describe("sinceId / beforeId pagination", () => {
 });
 
 describe("offset-only lists", () => {
-  it("pages watches by offset until a short page", async () => {
+  it("pages watches by offset until an empty page (a short page does not end it)", async () => {
     const { client, calls } = makeClient([
       json(200, { data: { watches: [{ id: "a" }, { id: "b" }] } }),
       json(200, { data: { watches: [{ id: "c" }] } }),
+      json(200, { data: { watches: [] } }),
     ]);
     const got = await client.watches.listAll({ limit: 2 }).toArray();
     expect(got).toHaveLength(3);
-    expect(calls.map((c) => c.url.searchParams.get("offset"))).toEqual(["0", "2"]);
+    expect(calls.map((c) => c.url.searchParams.get("offset"))).toEqual(["0", "2", "3"]);
   });
 
   it("pages boards with hasMore", async () => {

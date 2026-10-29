@@ -4,9 +4,79 @@
  * an unknown code still produces the status-mapped class.
  */
 
+/**
+ * Brand carried by every SDK error. `Symbol.for` is shared across module copies, so an error
+ * built by an ESM copy of this package is still recognised by the CJS copy (dual-package hazard).
+ * The value is the class-name chain, most specific first.
+ */
+export const VAQUILL_ERROR_BRAND: unique symbol = Symbol.for("vaquill.error");
+
+function brandOf(value: unknown): readonly string[] | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const chain = (value as Record<symbol, unknown>)[VAQUILL_ERROR_BRAND];
+  return Array.isArray(chain) ? (chain as string[]) : undefined;
+}
+
+/** True for any error raised by this SDK, including one created by another copy of the package. */
+export function isVaquillError(value: unknown): value is VaquillError {
+  return value instanceof Error && brandOf(value) !== undefined;
+}
+
 /** Base class for every error raised by this SDK. */
 export class VaquillError extends Error {
   override name = "VaquillError";
+
+  constructor(message?: string, options?: { cause?: unknown }) {
+    super(message, options);
+    const chain: string[] = [];
+    for (
+      let proto = Object.getPrototypeOf(this);
+      proto && proto !== Error.prototype;
+      proto = Object.getPrototypeOf(proto)
+    ) {
+      const ctor = (proto as { constructor?: { name?: string } }).constructor;
+      if (ctor?.name) chain.push(ctor.name);
+    }
+    Object.defineProperty(this, VAQUILL_ERROR_BRAND, { value: chain, enumerable: false });
+  }
+
+  /** Same as the module-level `isVaquillError`. */
+  static isVaquillError(value: unknown): value is VaquillError {
+    return isVaquillError(value);
+  }
+
+  /**
+   * Makes `instanceof` work across ESM and CJS copies of this package: an error from another
+   * copy matches when its brand lists this class's name.
+   */
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    // biome-ignore lint/complexity/noThisInStatic: `this` is the subclass being tested
+    if (Function.prototype[Symbol.hasInstance].call(this, value)) return true;
+    const chain = brandOf(value);
+    if (!chain || !(value instanceof Error)) return false;
+    // biome-ignore lint/complexity/noThisInStatic: `this` is the subclass being tested
+    return this === VaquillError || chain.includes(this.name);
+  }
+}
+
+/** A success response whose body was not the JSON the endpoint promises. */
+export class ResponseParseError extends VaquillError {
+  override name = "ResponseParseError";
+  readonly status: number;
+  readonly requestId: string | null;
+  /** The start of the unparseable body (at most 200 characters). */
+  readonly bodyPreview: string;
+  constructor(
+    status: number,
+    requestId: string | null,
+    bodyPreview: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`Response was not valid JSON (HTTP ${status}).`, options);
+    this.status = status;
+    this.requestId = requestId;
+    this.bodyPreview = bodyPreview.slice(0, 200);
+  }
 }
 
 /** The client-side `maxCredits` cap was reached; no request was sent. */
@@ -162,12 +232,47 @@ function str(v: unknown): string | null {
   return typeof v === "string" && v !== "" ? v : null;
 }
 
+/** "loc.path: msg" for the first few entries of a FastAPI-style validation list. */
+function summariseValidation(items: unknown[]): string | null {
+  const parts: string[] = [];
+  for (const item of items) {
+    if (typeof item === "string" && item) parts.push(item);
+    else if (isRecord(item)) {
+      const msg = str(item.msg) ?? str(item.message);
+      if (!msg) continue;
+      const path = Array.isArray(item.loc) ? item.loc : [];
+      const where = ["body", "query", "path", "header"].includes(String(path[0])) ? 1 : 0;
+      const loc = path.slice(path.length > 1 ? where : 0).join(".");
+      parts.push(loc ? `${loc}: ${msg}` : msg);
+    }
+  }
+  if (parts.length === 0) return null;
+  const shown = parts.slice(0, 3).join("; ");
+  const more = items.length - Math.min(parts.length, 3);
+  return more > 0 ? `${shown} (+${more} more)` : shown;
+}
+
 function messageFor(status: number, env: Record<string, unknown>): string {
   const detail = env.detail;
-  if (typeof detail === "string" && detail) return detail;
+  if (typeof detail === "string" && detail) {
+    // A 422 envelope carries the reason in `errors[]`; the string is only a generic label.
+    const why =
+      status === 422 && Array.isArray(env.errors) ? summariseValidation(env.errors) : null;
+    return why ? `${detail}: ${why}` : detail;
+  }
+  if (Array.isArray(detail)) {
+    const summary = summariseValidation(detail);
+    if (summary) return `HTTP ${status}: ${summary}`;
+  }
   if (isRecord(detail)) {
     const m = str(detail.message) ?? str(detail.detail) ?? str(detail.reason);
     if (m) return m;
   }
-  return str(env.title) ?? `HTTP ${status}`;
+  const title = str(env.title);
+  if (title) return title;
+  if (Array.isArray(env.errors)) {
+    const summary = summariseValidation(env.errors);
+    if (summary) return `HTTP ${status}: ${summary}`;
+  }
+  return `HTTP ${status}`;
 }

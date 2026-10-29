@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -23,11 +24,13 @@ from ._config import (
     DEFAULT_TIMEOUT,
     IDEMPOTENCY_HEADER,
     IDEMPOTENCY_STATUS_HEADER,
+    REQUEST_ID_HEADER,
 )
 from ._errors import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
+    ResponseParseError,
     SpendGuardExceeded,
     VaquillError,
     make_status_error,
@@ -49,6 +52,8 @@ class SpendTracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._total = 0.0
+        # Held from check to count by sync charged calls when max_credits is set.
+        self.serial_lock = threading.Lock()
 
     @property
     def total(self) -> float:
@@ -61,8 +66,16 @@ class SpendTracker:
 
 def _resolve_api_key(api_key: str | None) -> str:
     key = api_key if api_key is not None else os.environ.get(API_KEY_ENV)
+    # A key pasted from a file or a secret store often carries a trailing newline.
+    key = key.strip() if key is not None else key
     if not key:
         raise VaquillError(f"No API key. Pass api_key=... or set the {API_KEY_ENV} variable.")
+    if any(not 33 <= ord(c) <= 126 for c in key):
+        # The key is deliberately not echoed.
+        raise ValueError(
+            "Invalid API key: it contains control, whitespace or non-ASCII characters. "
+            "Check for a stray newline or quote in the value."
+        )
     if not key.startswith(API_KEY_PREFIX):
         # The key is deliberately not echoed.
         raise VaquillError(f"Invalid API key: Vaquill keys start with '{API_KEY_PREFIX}'.")
@@ -96,6 +109,8 @@ class BaseClient:
         self.idempotency_keys = idempotency_keys
         self.max_credits = max_credits
         self._spend = SpendTracker()
+        self._deprecations_seen: set[tuple[str, str]] = set()
+        self._deprecations_lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(base_url={self.base_url!r})"
@@ -140,13 +155,27 @@ class BaseClient:
         return new_key() if charged and self.idempotency_keys else None
 
     def _headers(self, key: str | None, extra: Mapping[str, str] | None) -> dict[str, str]:
-        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
-        headers.update(self.default_headers)
-        headers["Authorization"] = f"Bearer {self._api_key}"
+        headers = {"user-agent": _user_agent(), "accept": "application/json"}
+        # Case-insensitive merge. Authorization and Idempotency-Key are ours alone.
+        protected = {"authorization", IDEMPOTENCY_HEADER.lower()}
+        for source in (self.default_headers, extra or {}):
+            for name, value in source.items():
+                if name.lower() not in protected:
+                    headers[name.lower()] = value
+        headers["authorization"] = f"Bearer {self._api_key}"
         if key is not None:
-            headers[IDEMPOTENCY_HEADER] = key
-        headers.update(extra or {})
+            headers[IDEMPOTENCY_HEADER.lower()] = key
         return headers
+
+    def _target(self, path: str, params: Query | None) -> tuple[str, httpx.QueryParams | None]:
+        """The URL (without query) and the merged query. ``params`` wins over the path's own."""
+        path, _, _fragment = path.partition("#")
+        path, _, query = path.partition("?")
+        merged = httpx.QueryParams(query)
+        given = self._params(params)
+        if given:
+            merged = merged.merge(given)
+        return f"{self.base_url}/{path.lstrip('/')}", (merged if merged else None)
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
@@ -173,8 +202,10 @@ class BaseClient:
         try:
             data = response.json() if response.content else None
         except ValueError as exc:
-            raise VaquillError(
-                f"Response was not valid JSON (status {response.status_code})."
+            raise ResponseParseError(
+                f"Response was not valid JSON (status {response.status_code}).",
+                request_id=response.headers.get(REQUEST_ID_HEADER),
+                status_code=response.status_code,
             ) from exc
         adapter: TypeAdapter[Any] | None = None if cast_to is Any else TypeAdapter(cast_to)
         result: APIResponse[Any] = APIResponse(
@@ -184,6 +215,24 @@ class BaseClient:
             self._spend.add(result.credits_charged_this_call)
         log.debug("Response %s key=%s", response.status_code, redact_key(key) if key else None)
         return result
+
+    def _note_deprecation(self, request: httpx.Request, response: httpx.Response) -> None:
+        """One warning per (method, path) per client when the server flags an endpoint."""
+        deprecation = response.headers.get("Deprecation")
+        sunset = response.headers.get("Sunset")
+        if deprecation is None and sunset is None:
+            return
+        seen = (request.method, request.url.path)
+        with self._deprecations_lock:
+            if seen in self._deprecations_seen:
+                return
+            self._deprecations_seen.add(seen)
+        details = ", ".join(
+            f"{name}: {value}"
+            for name, value in (("Deprecation", deprecation), ("Sunset", sunset))
+            if value is not None
+        )
+        log.warning("%s %s is deprecated (%s).", request.method, request.url.path, details)
 
     def _log_retry(self, why: str, delay: float, attempt: int, retries: int) -> None:
         log.debug("Retrying after %s in %.2fs (retry %d of %d)", why, delay, attempt + 1, retries)
@@ -333,15 +382,42 @@ class SyncAPIClient(BaseClient):
         timeout: Timeout | None = None,
         max_retries: int | None = None,
     ) -> APIResponse[Any]:
+        if charged and self.max_credits is not None:
+            # Check-then-act must be exact: hold the lock from the check until the call is counted.
+            with self._spend.serial_lock:
+                self._check_spend(charged)
+                return self._execute(
+                    method, path, cast_to, params, json, headers, charged,
+                    idempotency_key, timeout, max_retries,
+                )  # fmt: skip
         self._check_spend(charged)
+        return self._execute(
+            method, path, cast_to, params, json, headers, charged,
+            idempotency_key, timeout, max_retries,
+        )  # fmt: skip
+
+    def _execute(
+        self,
+        method: str,
+        path: str,
+        cast_to: Any,
+        params: Query | None,
+        json: Any,
+        headers: Mapping[str, str] | None,
+        charged: bool,
+        idempotency_key: str | None,
+        timeout: Timeout | None,
+        max_retries: int | None,
+    ) -> APIResponse[Any]:
         key = self._key_for(charged, idempotency_key)
         retries = self.max_retries if max_retries is None else max_retries
+        url, query = self._target(path, params)
         attempt = 0
         while True:
             request = self._http.build_request(
                 method,
-                self._url(path),
-                params=self._params(params),
+                url,
+                params=query,
                 json=json,
                 headers=self._headers(key, headers),
                 timeout=self.timeout if timeout is None else timeout,
@@ -349,9 +425,9 @@ class SyncAPIClient(BaseClient):
             log.debug("Request %s %s key=%s", method, request.url, redact_key(key) if key else None)
             try:
                 response = self._http.send(request)
-            except httpx.TransportError as exc:
+            except httpx.RequestError as exc:
                 if attempt < retries and _retry.connection_error_is_retryable(
-                    exc, charged=charged, has_idempotency_key=key is not None
+                    exc, method=method, has_idempotency_key=key is not None
                 ):
                     delay = _retry.backoff_delay(attempt)
                     self._log_retry(type(exc).__name__, delay, attempt, retries)
@@ -361,10 +437,16 @@ class SyncAPIClient(BaseClient):
                 if isinstance(exc, httpx.TimeoutException):
                     raise APITimeoutError(request=request) from exc
                 raise APIConnectionError(request=request) from exc
+            self._note_deprecation(request, response)
             if response.is_success:
                 return self._finish(response, charged, cast_to, key)
             error = self._error_for(response)
-            delay = _retry.delay_for_status(error, attempt) if attempt < retries else None
+            replay_safe = key is not None or not charged
+            delay = (
+                _retry.delay_for_status(error, attempt, replay_safe=replay_safe)
+                if attempt < retries
+                else None
+            )
             if delay is None:
                 raise error
             self._log_retry(f"status {response.status_code}", delay, attempt, retries)
@@ -396,6 +478,8 @@ class AsyncAPIClient(BaseClient):
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient()
+        # Serialises charged calls when max_credits is set (see the Vaquill docstring).
+        self._charge_lock = asyncio.Lock()
 
     def with_options(
         self,
@@ -422,6 +506,7 @@ class AsyncAPIClient(BaseClient):
             http_client=self._http,
         )
         new._spend = self._spend  # pyright: ignore[reportPrivateUsage]
+        new._charge_lock = self._charge_lock  # pyright: ignore[reportPrivateUsage]
         return new
 
     async def aclose(self) -> None:
@@ -513,15 +598,42 @@ class AsyncAPIClient(BaseClient):
         timeout: Timeout | None = None,
         max_retries: int | None = None,
     ) -> APIResponse[Any]:
+        if charged and self.max_credits is not None:
+            # Check-then-act must be exact: hold the lock from the check until the call is counted.
+            async with self._charge_lock:
+                self._check_spend(charged)
+                return await self._execute(
+                    method, path, cast_to, params, json, headers, charged,
+                    idempotency_key, timeout, max_retries,
+                )  # fmt: skip
         self._check_spend(charged)
+        return await self._execute(
+            method, path, cast_to, params, json, headers, charged,
+            idempotency_key, timeout, max_retries,
+        )  # fmt: skip
+
+    async def _execute(
+        self,
+        method: str,
+        path: str,
+        cast_to: Any,
+        params: Query | None,
+        json: Any,
+        headers: Mapping[str, str] | None,
+        charged: bool,
+        idempotency_key: str | None,
+        timeout: Timeout | None,
+        max_retries: int | None,
+    ) -> APIResponse[Any]:
         key = self._key_for(charged, idempotency_key)
         retries = self.max_retries if max_retries is None else max_retries
+        url, query = self._target(path, params)
         attempt = 0
         while True:
             request = self._http.build_request(
                 method,
-                self._url(path),
-                params=self._params(params),
+                url,
+                params=query,
                 json=json,
                 headers=self._headers(key, headers),
                 timeout=self.timeout if timeout is None else timeout,
@@ -529,9 +641,9 @@ class AsyncAPIClient(BaseClient):
             log.debug("Request %s %s key=%s", method, request.url, redact_key(key) if key else None)
             try:
                 response = await self._http.send(request)
-            except httpx.TransportError as exc:
+            except httpx.RequestError as exc:
                 if attempt < retries and _retry.connection_error_is_retryable(
-                    exc, charged=charged, has_idempotency_key=key is not None
+                    exc, method=method, has_idempotency_key=key is not None
                 ):
                     delay = _retry.backoff_delay(attempt)
                     self._log_retry(type(exc).__name__, delay, attempt, retries)
@@ -541,10 +653,16 @@ class AsyncAPIClient(BaseClient):
                 if isinstance(exc, httpx.TimeoutException):
                     raise APITimeoutError(request=request) from exc
                 raise APIConnectionError(request=request) from exc
+            self._note_deprecation(request, response)
             if response.is_success:
                 return self._finish(response, charged, cast_to, key)
             error = self._error_for(response)
-            delay = _retry.delay_for_status(error, attempt) if attempt < retries else None
+            replay_safe = key is not None or not charged
+            delay = (
+                _retry.delay_for_status(error, attempt, replay_safe=replay_safe)
+                if attempt < retries
+                else None
+            )
             if delay is None:
                 raise error
             self._log_retry(f"status {response.status_code}", delay, attempt, retries)

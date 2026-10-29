@@ -10,7 +10,7 @@ Official client libraries for the Vaquill US Data API: primary law (statutes, re
 | Language | Package | Install | Package README |
 | --- | --- | --- | --- |
 | Python 3.11+ | [`vaquill`](https://pypi.org/project/vaquill/) | `pip install vaquill` | [python/README.md](python/README.md) |
-| TypeScript, Node 20+, Bun, Deno, edge runtimes | [`@vaquill-ai/sdk`](https://www.npmjs.com/package/@vaquill-ai/sdk) | `npm install @vaquill-ai/sdk` | [js/README.md](js/README.md) |
+| TypeScript, built on standard `fetch`, CI-tested on Node 20, 22 and 24 | [`@vaquill-ai/sdk`](https://www.npmjs.com/package/@vaquill-ai/sdk) | `npm install @vaquill-ai/sdk` | [js/README.md](js/README.md) |
 
 Both packages share the same behavior: retries with backoff, idempotency keys on charged calls, a spend guard, typed errors, pagination helpers and webhook signature verification.
 The Python package also installs a `vaquill` command line tool.
@@ -26,7 +26,8 @@ The Python package also installs a `vaquill` command line tool.
 | Data API guide (authentication, pagination, errors, alerts) | [vaquill.ai/docs/api-guide/overview](https://www.vaquill.ai/docs/api-guide/overview) |
 | API reference (every endpoint) | [vaquill.ai/docs/api-reference](https://www.vaquill.ai/docs/api-reference/) |
 | Get an API key | [app.vaquill.ai/settings](https://app.vaquill.ai/settings) |
-| Every operation, its method name and its credit cost | [Python](python/docs/OPERATIONS.md), [TypeScript](js/README.md#charged-methods) |
+| Every operation, its method name and whether it is charged | [Python](python/docs/OPERATIONS.md), [TypeScript](js/README.md#charged-methods) |
+| Live credit price of every endpoint (prices are not hard-coded in the SDKs) | `client.pricing.get()` in both SDKs (free); also the [Data API guide](https://www.vaquill.ai/docs/api-guide/overview) |
 
 ## Quickstart
 
@@ -87,7 +88,9 @@ vaquill credits   # free
 
 - **Server side only.** An API key in browser code is readable by anyone. The TypeScript client warns when it detects a browser.
 - **Most calls cost credits.** Each response reports `credits_consumed` (Python) or `creditsConsumed` (TypeScript), and the client keeps a running total. Auto-pagination spends credits per page, so read the pagination section of your language's README first.
-- **Retries are safe.** Charged calls carry an `Idempotency-Key`, so a retried request after a timeout is not billed twice. The SDKs never retry a 402 (no credits).
+- **Retries are designed to be safe.** Charged calls carry an `Idempotency-Key`, so when the server honours that header a retried request after a timeout is not billed twice.
+  The SDKs never retry a 402 (no credits).
+- **Versioning.** The public API of both SDKs follows semantic versioning and may change in minor versions before 1.0.
 - **Typed errors.** Every failure is a `VaquillError` subclass carrying the HTTP status, request id and the parsed error body, with `code`, `retryable` and a retry hint when the server sends them.
 - **Webhooks.** `verify_webhook` (Python) and `verifyWebhook` (TypeScript) check Standard Webhooks signatures for law-change alerts. See the [alerts guide](https://www.vaquill.ai/docs/api-guide/alerts).
 
@@ -95,7 +98,7 @@ vaquill credits   # free
 
 | Area | Examples |
 | --- | --- |
-| Statutes | search, resolve a citation to a section, section text, browse the hierarchy, amendment history, cross-references, rulemaking, extract citations from a document |
+| Statutes | search, resolve a citation to a section, section text, browse the hierarchy, amendment history, cross-references, rulemaking, extract citations from a document (free with `resolve=false`, otherwise 2 credits per distinct citation) |
 | Session laws | acts as enacted: search, list, record, text, versions, changes |
 | Law-change alerts | create a watch on a source, receive webhooks or email, inspect deliveries |
 | Account | credit balance (free), pricing for every endpoint |
