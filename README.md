@@ -16,7 +16,7 @@ More languages are built and tested in this repository but are **not yet publish
 
 | Language | Package | Status | Package README |
 | --- | --- | --- | --- |
-| Go 1.23+ | `github.com/Vaquill-AI/vaquill-sdks/go` | not yet published | [go/README.md](go/README.md) |
+| Go 1.23+ | `github.com/Vaquill-AI/vaquill-sdks/go` | `go get` (v0.1.0) | [go/README.md](go/README.md) |
 | Java 11+ | `ai.vaquill:vaquill-sdk` | not yet published | [java/README.md](java/README.md) |
 | Kotlin (JVM 11+), coroutines and Flow | `ai.vaquill:vaquill-kotlin` | not yet published | [kotlin/README.md](kotlin/README.md) |
 
