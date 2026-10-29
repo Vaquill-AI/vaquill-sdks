@@ -1,6 +1,6 @@
 {
   "name": "@vaquill-ai/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript client for the Vaquill US primary law Data API.",
   "license": "MIT",
   "author": "Vaquill",
