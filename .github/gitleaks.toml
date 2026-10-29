@@ -1,0 +1,25 @@
+# Used by the secret-scan job in ci.yml. Extends the default gitleaks rules.
+title = "vaquill sdk gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "vaquill-api-key"
+description = "Vaquill API key (vq_key_)"
+regex = '''vq_key_[A-Za-z0-9]{20,}'''
+keywords = ["vq_key_"]
+
+[rules.allowlist]
+description = "Obvious test and documentation placeholders, never real keys"
+regexes = ['''vq_key_(test|from_env|example|fake|dummy|placeholder|xxx)[A-Za-z0-9_]*''']
+
+# Fixtures that are public by design: the Standard Webhooks specification's own
+# example secret, the fake key the test suites use, and an example idempotency key.
+[allowlist]
+description = "Documented test fixtures"
+regexes = [
+  '''whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw''',
+  '''vq_key_test_0123456789abcdef''',
+  '''my-key-0123456789''',
+]

@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an addition to one of the Vaquill SDKs
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - "vaquill (Python)"
+        - "@vaquill/sdk (TypeScript)"
+        - "Both, or the OpenAPI contract"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like the SDK to do
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

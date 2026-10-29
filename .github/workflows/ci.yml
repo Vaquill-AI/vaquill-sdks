@@ -1,0 +1,322 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Reused by python-release.yml and js-release.yml so a tag is only published
+  # after the checks for its own package pass.
+  workflow_call:
+    inputs:
+      only:
+        description: "Which package to check: all, python or js. Shared checks always run."
+        type: string
+        default: all
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+# Every job runs on every change. The packages are small and a path filter
+# would leave a required check "pending" forever when its paths are untouched.
+jobs:
+  # ---------------------------------------------------------------- Python
+  py-lint:
+    name: Python lint and type check
+    if: inputs.only != 'js'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      # pyproject.toml points pyright at ./.venv, so the venv must live there.
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e . pytest pytest-asyncio ruff pyright
+      - name: Ruff lint
+        run: .venv/bin/ruff check .
+      - name: Ruff format
+        run: .venv/bin/ruff format --check .
+      - name: Pyright (strict)
+        run: .venv/bin/pyright
+
+  py-test:
+    name: Python test (${{ matrix.python-version }})
+    if: inputs.only != 'js'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: python
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e . pytest pytest-asyncio
+      - name: Pytest
+        run: .venv/bin/python -m pytest
+
+  py-build:
+    name: Python build and package check
+    if: inputs.only != 'js'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Wheel ships the typing marker
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          if "vaquill/py.typed" not in names:
+              sys.exit("vaquill/py.typed is missing from the wheel")
+          PY
+      - name: Smoke test the wheel in a clean venv
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          "$RUNNER_TEMP/smoke/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/smoke/bin/python" -c "import vaquill; print(vaquill.__version__)"
+
+  # ------------------------------------------------------------ TypeScript
+  js-lint:
+    name: JS lint and type check
+    if: inputs.only != 'python'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Biome
+        run: npm run lint
+      # The declarations under test/live import the built package.
+      - name: Build
+        run: npm run build
+      - name: tsc (strict)
+        run: npm run typecheck
+      - name: Generated types match the pinned spec
+        run: |
+          npm run gen
+          git diff --exit-code -- src/_generated
+
+  js-test:
+    name: JS test and build (Node ${{ matrix.node-version }})
+    if: inputs.only != 'python'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: js
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22", "24"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: npm ci --ignore-scripts
+      - name: Vitest
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  js-package:
+    name: JS package check (publint, attw)
+    if: inputs.only != 'python'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      # package.json: "lint:package": "publint && attw --pack . --profile node16"
+      - name: publint and arethetypeswrong
+        run: npm run lint:package
+      - name: Verify registry signatures of installed dependencies
+        run: npm audit signatures
+
+  # ---------------------------------------------------------------- shared
+  contract:
+    name: Contract and licence files
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Tripwire only. The authoritative gate is the backend's
+      # scripts/sdk/export_openapi.py --check. oasdiff is deliberately not run here.
+      - name: openapi/vaquill-us.json matches CONTRACT_VERSION
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          lines = [
+              line.strip()
+              for line in pathlib.Path("CONTRACT_VERSION").read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          ]
+          if len(lines) != 1:
+              sys.exit("CONTRACT_VERSION must hold exactly one version line")
+          pinned = lines[0]
+          spec = json.loads(pathlib.Path("openapi/vaquill-us.json").read_text())
+          actual = spec["info"]["version"]
+          if not str(spec.get("openapi", "")).startswith("3.1"):
+              sys.exit(f"expected an OpenAPI 3.1 document, got {spec.get('openapi')!r}")
+          if actual != pinned:
+              sys.exit(
+                  f"spec drift: openapi/vaquill-us.json is {actual}, CONTRACT_VERSION pins {pinned}"
+              )
+          print(f"contract {pinned} OK")
+          PY
+      # Each package ships its own LICENSE in its sdist and tarball.
+      - name: Package LICENSE files equal the root LICENSE
+        run: |
+          cmp LICENSE python/LICENSE
+          cmp LICENSE js/LICENSE
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (pinned release, checksum verified)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 --output "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check -
+          mkdir "$RUNNER_TEMP/gitleaks"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/gitleaks" gitleaks
+      - name: Scan history (default rules plus the vq_key_ rule)
+        run: >-
+          "$RUNNER_TEMP/gitleaks/gitleaks" git
+          --config .github/gitleaks.toml --redact --no-banner --verbose .
+
+  pr-title:
+    name: PR title is a Conventional Commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Check title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          if ! [[ "$TITLE" =~ $pattern ]]; then
+            echo "::error::PR title must follow Conventional Commits, for example 'fix(python): honour Retry-After dates'"
+            exit 1
+          fi
+
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs:
+      - py-lint
+      - py-test
+      - py-build
+      - js-lint
+      - js-test
+      - js-package
+      - contract
+      - secret-scan
+      - pr-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every job to pass or be skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -Eq '"(failure|cancelled)"'; then exit 1; fi

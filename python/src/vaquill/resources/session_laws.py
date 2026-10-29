@@ -1,0 +1,377 @@
+"""``client.session_laws``: acts as enacted. Every operation here is charged."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any, TypedDict, Unpack
+
+from .._pagination import CursorStyle, SyncPaginator
+from ..types import (
+    SessionLawBatchResponse,
+    SessionLawBodyResponse,
+    SessionLawChange,
+    SessionLawChangesResponse,
+    SessionLawListResponse,
+    SessionLawResponse,
+    SessionLawSearchResponse,
+    SessionLawSearchResult,
+    SessionLawSummary,
+    SessionLawVersionsResponse,
+)
+from ._base import HasMoreId, HasMoreOffset, RequestOptions, SyncResource, compact, seg, wire
+
+__all__ = ["SyncSessionLaws"]
+
+
+class ListFilters(TypedDict, total=False):
+    """Filters of :meth:`SyncSessionLaws.list`, also taken by ``iter_list``."""
+
+    session: str
+    series: Sequence[str]
+    instrument_type: Sequence[str]
+    approved_from: str
+    approved_to: str
+    effective_from: str
+    effective_to: str
+    has_text: bool
+    text_status: str
+    is_law: bool
+    enactment_outcome: Sequence[str]
+    updated_since: str
+    q: str
+    limit: int
+
+
+class SyncSessionLaws(SyncResource):
+    def search(
+        self,
+        query: str,
+        *,
+        jurisdiction: str | None = None,
+        session: str | None = None,
+        series: Sequence[str] | None = None,
+        instrument_type: Sequence[str] | None = None,
+        approved_from: str | None = None,
+        approved_to: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawSearchResponse:
+        """Search session laws by topic or wording. Charged, 4 credits per page.
+
+        Args:
+            query: Search text.
+            jurisdiction: Lowercase state code.
+            session: Legislative session label.
+            series: Only these session law series.
+            instrument_type: Only these instrument types (``"act"``, ``"resolution"``...).
+            approved_from: Earliest approval date (``YYYY-MM-DD``).
+            approved_to: Latest approval date.
+            limit: Results per page, 1 to 25 (server default 10).
+            offset: Results to skip (server maximum 59).
+        """
+        body = {
+            "query": query,
+            "jurisdiction": jurisdiction,
+            "session": session,
+            "series": series,
+            "instrumentType": instrument_type,
+            "approvedFrom": approved_from,
+            "approvedTo": approved_to,
+            "limit": limit,
+            "offset": offset,
+        }
+        return self._client.request(
+            "POST",
+            "/api/v1/us/session-laws/search",
+            cast_to=SessionLawSearchResponse,
+            json=compact(body),
+            charged=True,
+            **options,
+        )
+
+    def iter_search(
+        self,
+        query: str,
+        *,
+        jurisdiction: str | None = None,
+        session: str | None = None,
+        series: Sequence[str] | None = None,
+        instrument_type: Sequence[str] | None = None,
+        approved_from: str | None = None,
+        approved_to: str | None = None,
+        limit: int = 10,
+        max_pages: int | None = None,
+        max_items: int | None = None,
+    ) -> SyncPaginator[SessionLawSearchResult]:
+        """Iterate search results across pages. Every page is charged: set a guard."""
+
+        def fetch(body: dict[str, Any]) -> Any:
+            response = self._client.raw_request(
+                "POST", "/api/v1/us/session-laws/search", json=body, charged=True
+            )
+            return response.json()
+
+        return SyncPaginator(
+            fetch,
+            style=HasMoreOffset(),
+            items_key="results",
+            params=wire(
+                {
+                    "query": query,
+                    "jurisdiction": jurisdiction,
+                    "session": session,
+                    "series": series,
+                    "instrument_type": instrument_type,
+                    "approved_from": approved_from,
+                    "approved_to": approved_to,
+                    "limit": limit,
+                    "offset": 0,
+                }
+            ),
+            max_pages=max_pages,
+            max_items=max_items,
+            parse=SessionLawSearchResult.model_validate,
+        )
+
+    def list(
+        self,
+        jurisdiction: str,
+        *,
+        session: str | None = None,
+        series: Sequence[str] | None = None,
+        instrument_type: Sequence[str] | None = None,
+        approved_from: str | None = None,
+        approved_to: str | None = None,
+        effective_from: str | None = None,
+        effective_to: str | None = None,
+        has_text: bool | None = None,
+        text_status: str | None = None,
+        is_law: bool | None = None,
+        enactment_outcome: Sequence[str] | None = None,
+        updated_since: str | None = None,
+        q: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawListResponse:
+        """List a state's session laws with filters. Charged, 1 credit per page.
+
+        Args:
+            jurisdiction: Lowercase state code.
+            session: Legislative session label.
+            series: Only these series.
+            instrument_type: Only these instrument types.
+            approved_from: Earliest approval date.
+            approved_to: Latest approval date.
+            effective_from: Earliest effective date.
+            effective_to: Latest effective date.
+            has_text: Only laws whose text is (or is not) held.
+            text_status: Text status filter.
+            is_law: Only enacted laws (or only the rest).
+            enactment_outcome: Only these outcomes.
+            updated_since: Only records updated after this timestamp.
+            q: Title text filter.
+            cursor: ``nextCursor`` of the previous page.
+            limit: Rows per page, 1 to 200 (server default 50).
+        """
+        params = {
+            "jurisdiction": jurisdiction,
+            "session": session,
+            "series": series,
+            "instrumentType": instrument_type,
+            "approvedFrom": approved_from,
+            "approvedTo": approved_to,
+            "effectiveFrom": effective_from,
+            "effectiveTo": effective_to,
+            "hasText": has_text,
+            "textStatus": text_status,
+            "isLaw": is_law,
+            "enactmentOutcome": enactment_outcome,
+            "updatedSince": updated_since,
+            "q": q,
+            "cursor": cursor,
+            "limit": limit,
+        }
+        return self._client.request(
+            "GET",
+            "/api/v1/us/session-laws/list",
+            cast_to=SessionLawListResponse,
+            params=params,
+            charged=True,
+            **options,
+        )
+
+    def iter_list(
+        self,
+        jurisdiction: str,
+        *,
+        max_pages: int | None = None,
+        max_items: int | None = None,
+        **filters: Unpack[ListFilters],
+    ) -> SyncPaginator[SessionLawSummary]:
+        """Iterate :meth:`list` across pages. Every page is charged: set a guard."""
+
+        def fetch(params: dict[str, Any]) -> Any:
+            response = self._client.raw_request(
+                "GET", "/api/v1/us/session-laws/list", params=params, charged=True
+            )
+            return response.json()
+
+        return SyncPaginator(
+            fetch,
+            style=CursorStyle(),
+            items_key="results",
+            params=wire({"jurisdiction": jurisdiction, **filters}),
+            max_pages=max_pages,
+            max_items=max_items,
+            parse=SessionLawSummary.model_validate,
+        )
+
+    def get(
+        self,
+        session_law_id: str,
+        *,
+        jurisdiction: str | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawResponse:
+        """One session law's record (no text). Charged, 2 credits.
+
+        Args:
+            session_law_id: The id, or a citation (adds the resolve price).
+            jurisdiction: Needed when a citation is passed without a state.
+        """
+        return self._client.request(
+            "GET",
+            f"/api/v1/us/session-laws/{seg(session_law_id)}",
+            cast_to=SessionLawResponse,
+            params={"jurisdiction": jurisdiction},
+            charged=True,
+            **options,
+        )
+
+    def get_body(
+        self,
+        session_law_id: str,
+        *,
+        cursor: str | None = None,
+        start_char: int | None = None,
+        expect_text_sha256: str | None = None,
+        version: int | None = None,
+        include_unverified: bool | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawBodyResponse:
+        """One page of a session law's text. Charged, 6 credits per page.
+
+        Args:
+            session_law_id: The id.
+            cursor: ``nextCursor`` of the previous page.
+            start_char: Character offset to start from.
+            expect_text_sha256: Fail with 409 if the text changed since you hashed it.
+            version: A version number from :meth:`versions`.
+            include_unverified: Also serve text we have not verified.
+        """
+        params = {
+            "cursor": cursor,
+            "startChar": start_char,
+            "expectTextSha256": expect_text_sha256,
+            "version": version,
+            "includeUnverified": include_unverified,
+        }
+        return self._client.request(
+            "GET",
+            f"/api/v1/us/session-laws/{seg(session_law_id)}/body",
+            cast_to=SessionLawBodyResponse,
+            params=params,
+            charged=True,
+            **options,
+        )
+
+    def versions(
+        self, session_law_id: str, **options: Unpack[RequestOptions]
+    ) -> SessionLawVersionsResponse:
+        """Every version of a session law. Charged, 1 credit."""
+        return self._client.request(
+            "GET",
+            f"/api/v1/us/session-laws/{seg(session_law_id)}/versions",
+            cast_to=SessionLawVersionsResponse,
+            charged=True,
+            **options,
+        )
+
+    def get_batch(
+        self,
+        ids: Sequence[str],
+        *,
+        jurisdiction: str | None = None,
+        include_body: bool | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawBatchResponse:
+        """Full records for many session laws. Charged, 2 credits per law served.
+
+        Args:
+            ids: Session law ids or citations.
+            jurisdiction: Default state for citations.
+            include_body: Include the text of each law.
+        """
+        body = {"ids": list(ids), "jurisdiction": jurisdiction, "includeBody": include_body}
+        return self._client.request(
+            "POST",
+            "/api/v1/us/session-laws/batch",
+            cast_to=SessionLawBatchResponse,
+            json=compact(body),
+            charged=True,
+            **options,
+        )
+
+    def changes(
+        self,
+        *,
+        since_id: int | None = None,
+        jurisdiction: str | None = None,
+        limit: int | None = None,
+        **options: Unpack[RequestOptions],
+    ) -> SessionLawChangesResponse:
+        """Session law changes since a cursor, oldest first. Charged, 1 credit per page.
+
+        Args:
+            since_id: Last id you have seen; ``0`` starts from the beginning.
+            jurisdiction: Only this state.
+            limit: Entries per page, 1 to 200 (server default 50).
+        """
+        params = {"sinceId": since_id, "jurisdiction": jurisdiction, "limit": limit}
+        return self._client.request(
+            "GET",
+            "/api/v1/us/session-laws/changes",
+            cast_to=SessionLawChangesResponse,
+            params=params,
+            charged=True,
+            **options,
+        )
+
+    def iter_changes(
+        self,
+        *,
+        since_id: int = 0,
+        jurisdiction: str | None = None,
+        limit: int = 50,
+        max_pages: int | None = None,
+        max_items: int | None = None,
+    ) -> SyncPaginator[SessionLawChange]:
+        """Iterate changes forward from ``since_id``. Every page is charged: set a guard."""
+
+        def fetch(params: dict[str, Any]) -> Any:
+            response = self._client.raw_request(
+                "GET", "/api/v1/us/session-laws/changes", params=params, charged=True
+            )
+            return response.json()
+
+        return SyncPaginator(
+            fetch,
+            style=HasMoreId("sinceId"),
+            items_key="changes",
+            params=wire({"since_id": since_id, "jurisdiction": jurisdiction, "limit": limit}),
+            max_pages=max_pages,
+            max_items=max_items,
+            parse=SessionLawChange.model_validate,
+        )

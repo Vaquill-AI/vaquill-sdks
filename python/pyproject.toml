@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vaquill"
+dynamic = ["version"]
+description = "Python SDK for the Vaquill US primary law Data API."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27,<1", "pydantic>=2,<3"]
+authors = [{ name = "Vaquill" }]
+keywords = ["vaquill", "legal", "law", "statutes", "regulations", "api", "sdk", "cli", "legal-data"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://www.vaquill.ai"
+Documentation = "https://www.vaquill.ai/docs/api-guide/sdks/overview"
+Source = "https://github.com/Vaquill-AI/vaquill-sdks/tree/main/python"
+Issues = "https://github.com/Vaquill-AI/vaquill-sdks/issues"
+
+[project.scripts]
+vaquill = "vaquill.cli:main"
+
+[tool.hatch.version]
+path = "src/vaquill/_version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/docs",
+  "/examples",
+  "/LICENSE",
+  "/README.md",
+]
+exclude = ["__pycache__", "*.pyc"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vaquill"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["live: opt-in tests against the production API (spend credits); set VAQUILL_LIVE=1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["src/vaquill/types"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests", "scripts", "examples"]
+strict = ["src", "tests", "scripts", "examples"]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+  "pytest==9.2.0",
+  "pytest-asyncio==1.4.1",
+  "ruff==0.17.3",
+  "pyright==1.1.414",
+  "build==1.6.1",
+  "black==26.10.1",
+  "datamodel-code-generator==0.87.0",
+]

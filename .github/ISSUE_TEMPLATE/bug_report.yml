@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in one of the Vaquill SDKs does not behave as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste an API key. Replace it with `vq_key_...` in code and logs.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - "vaquill (Python)"
+        - "@vaquill/sdk (TypeScript)"
+        - "Both, or the OpenAPI contract"
+    validations:
+      required: true
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and OS
+      placeholder: "Python 3.12.4 or Node 22.4, macOS 15"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: request-id
+    attributes:
+      label: Request ID
+      description: Shown on the error object when the API returned one.

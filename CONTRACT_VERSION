@@ -1,0 +1,5 @@
+# API contract version this SDK repo is pinned to (openapi/vaquill-us.json info.version).
+# CI fails when the two disagree. This is only a local tripwire: the real gate is the
+# backend's `scripts/sdk/export_openapi.py --check`, run against production config.
+# Bump this file in the same commit that refreshes openapi/vaquill-us.json.
+1.0.0

@@ -1,0 +1,81 @@
+{
+  "name": "@vaquill/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client for the Vaquill US primary law Data API.",
+  "license": "MIT",
+  "author": "Vaquill",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vaquill-AI/vaquill-sdks.git",
+    "directory": "js"
+  },
+  "homepage": "https://www.vaquill.ai/docs/api-guide/sdks/overview",
+  "bugs": {
+    "url": "https://github.com/Vaquill-AI/vaquill-sdks/issues"
+  },
+  "keywords": [
+    "vaquill",
+    "sdk",
+    "api-client",
+    "legal",
+    "law",
+    "statutes",
+    "regulations",
+    "session-laws",
+    "us-law",
+    "legal-data",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "gen": "openapi-typescript ../openapi/vaquill-us.json --default-non-nullable false -o src/_generated/schema.d.ts && node scripts/prune-types.mjs",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:live": "VAQUILL_LIVE=1 vitest run --config vitest.live.config.ts",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "lint:package": "publint && attw --pack . --profile node16",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@biomejs/biome": "^2.6.3",
+    "@types/node": "^26.6.6",
+    "openapi-typescript": "^7.13.0",
+    "publint": "^0.3.25",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^5.0.5"
+  }
+}
