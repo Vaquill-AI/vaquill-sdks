@@ -81,10 +81,10 @@ venv = ".venv"
 [dependency-groups]
 dev = [
   "pytest==9.2.0",
-  "pytest-asyncio==1.4.1",
-  "ruff==0.17.3",
+  "pytest-asyncio==1.4.1.post1",
+  "ruff==0.17.4",
   "pyright==1.1.414",
   "build==1.6.1",
   "black==26.10.1",
-  "datamodel-code-generator==0.87.0",
+  "datamodel-code-generator==0.91.0",
 ]
